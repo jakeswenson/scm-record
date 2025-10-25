@@ -7,7 +7,7 @@
 #![cfg(feature = "tree-sitter")]
 
 use std::path::Path;
-use tree_house_bindings::rust as tree_sitter_rust;
+use tree_sitter_rust;
 use tree_sitter::{Parser, Query, QueryCursor};
 
 /// Represents the type of a semantic node in the source code.
