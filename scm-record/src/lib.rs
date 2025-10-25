@@ -14,6 +14,9 @@ mod types;
 mod ui;
 mod util;
 
+#[cfg(feature = "tree-sitter")]
+pub mod semantic;
+
 pub mod consts;
 pub mod helpers;
 pub use types::{

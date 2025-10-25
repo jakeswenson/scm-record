@@ -18,6 +18,7 @@ rust-version = "1.85"
 debug = ["serde"]
 default = ["debug"]
 serde = ["dep:serde", "dep:serde_json"]
+tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-rust"]
 
 [dependencies]
 cassowary = "0.3"
@@ -31,6 +32,10 @@ unicode-width = "0.2"
 # Features: serde
 serde = { version = "1.0", features = ["serde_derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
+
+# Features: tree-sitter
+tree-sitter = { version = "0.24", optional = true }
+tree-sitter-rust = { version = "0.23", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
