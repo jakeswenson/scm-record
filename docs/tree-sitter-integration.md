@@ -4,7 +4,9 @@ This document describes the tree-sitter integration for semantic-level change se
 
 ## Overview
 
-Tree-sitter integration enables selecting changes at semantic boundaries (functions, classes, methods, etc.) rather than just at the line level. This makes it easier to commit logically-related changes together.
+Tree-sitter integration via **tree-house** enables selecting changes at semantic boundaries (functions, classes, methods, etc.) rather than just at the line level. This makes it easier to commit logically-related changes together.
+
+We use [tree-house](https://github.com/helix-editor/tree-house), a modern tree-sitter Rust API developed by the Helix team, which provides a clean abstraction over tree-sitter-rs.
 
 ## Status
 
@@ -96,10 +98,10 @@ if let Some(nodes) = parse_semantic_nodes(language, source) {
                   │
                   ▼
 ┌─────────────────────────────────────────┐
-│          tree-sitter Library            │
-│  - Language grammars (tree-sitter-rust) │
-│  - Parsing engine                       │
-│  - Query system                         │
+│          tree-house Library             │
+│  - Modern tree-sitter Rust API          │
+│  - Built-in language grammars           │
+│  - Parsing engine & query system        │
 └─────────────────────────────────────────┘
 ```
 
@@ -193,9 +195,9 @@ Found 6 semantic nodes:
 
 To add support for a new language:
 
-1. Add the tree-sitter grammar crate to `Cargo.toml`
+1. Ensure tree-house supports the language (check tree-house documentation)
 2. Add the language to the `Language` enum in `semantic.rs`
-3. Implement a `parse_<language>` function
+3. Implement a `parse_<language>` function using tree-house's built-in language support
 4. Add the language to `parse_semantic_nodes` match statement
 5. Write tests for the new language
 6. Update this documentation
@@ -211,5 +213,6 @@ To add support for a new language:
 ## References
 
 - [ADR 001: Tree-sitter Integration](adrs/001-tree-sitter-integration.md)
+- [tree-house](https://github.com/helix-editor/tree-house) - Modern tree-sitter Rust API
 - [tree-sitter](https://tree-sitter.github.io/)
 - [Issue #2: Integrate tree-sitter into this tool](https://github.com/jakeswenson/scm-record/issues/2)

@@ -1,12 +1,13 @@
 //! Semantic analysis using tree-sitter for syntax-aware change selection.
 //!
-//! This module provides tree-sitter integration to enable selecting changes at
+//! This module provides tree-sitter integration via tree-house to enable selecting changes at
 //! semantic boundaries (functions, classes, methods, etc.) rather than just at
 //! the line level.
 
 #![cfg(feature = "tree-sitter")]
 
 use std::path::Path;
+use tree_house::{Language as TreeHouseLanguage, Parser, Query, QueryCursor};
 
 /// Represents the type of a semantic node in the source code.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,16 +88,13 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
     }
 }
 
-/// Parse Rust source code using tree-sitter.
+/// Parse Rust source code using tree-house.
 fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
-    use tree_sitter::{Parser, Query, QueryCursor};
-
     let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .ok()?;
+    let rust_lang = TreeHouseLanguage::rust();
+    parser.set_language(rust_lang).ok()?;
 
-    let tree = parser.parse(source, None)?;
+    let tree = parser.parse(source.as_bytes(), None)?;
     let root_node = tree.root_node();
 
     // Query for interesting Rust constructs
@@ -114,7 +112,7 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
             name: (identifier) @mod.name) @mod.def
     "#;
 
-    let query = Query::new(&tree_sitter_rust::LANGUAGE.into(), query_source).ok()?;
+    let query = Query::new(rust_lang, query_source).ok()?;
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, root_node, source.as_bytes());
 
@@ -176,10 +174,10 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
 /// Helper function to extract text for a named capture.
 fn get_text_for_node(
     source: &str,
-    _parent: tree_sitter::Node,
+    _parent: tree_house::Node,
     capture_name: &str,
-    match_: &tree_sitter::QueryMatch,
-    query: &tree_sitter::Query,
+    match_: &tree_house::QueryMatch,
+    query: &Query,
 ) -> Option<String> {
     for capture in match_.captures {
         if query.capture_names()[capture.index as usize] == capture_name {
