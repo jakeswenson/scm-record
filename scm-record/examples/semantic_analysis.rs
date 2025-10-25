@@ -4,7 +4,7 @@
 
 #[cfg(feature = "tree-sitter")]
 fn main() {
-    use scm_record::semantic::{Language, SemanticNodeType, parse_semantic_nodes};
+    use scm_record::semantic::{parse_semantic_nodes, Language, SemanticNodeType};
     use std::path::Path;
 
     let rust_source = r#"
@@ -65,7 +65,9 @@ fn calculate_area(width: f64, height: f64) -> f64 {
                     SemanticNodeType::Other(s) => s,
                 };
 
-                let name = node.name.as_ref()
+                let name = node
+                    .name
+                    .as_ref()
                     .map(|n| format!(" '{}'", n))
                     .unwrap_or_default();
 

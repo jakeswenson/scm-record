@@ -1,13 +1,14 @@
 //! Semantic analysis using tree-sitter for syntax-aware change selection.
 //!
-//! This module provides tree-sitter integration via tree-house to enable selecting changes at
+//! This module provides tree-sitter integration to enable selecting changes at
 //! semantic boundaries (functions, classes, methods, etc.) rather than just at
 //! the line level.
 
 #![cfg(feature = "tree-sitter")]
 
 use std::path::Path;
-use tree_house::{Language as TreeHouseLanguage, Parser, Query, QueryCursor};
+use tree_house_bindings::rust as tree_sitter_rust;
+use tree_sitter::{Parser, Query, QueryCursor};
 
 /// Represents the type of a semantic node in the source code.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -88,13 +89,13 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
     }
 }
 
-/// Parse Rust source code using tree-house.
+/// Parse Rust source code using tree-sitter.
 fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
     let mut parser = Parser::new();
-    let rust_lang = TreeHouseLanguage::rust();
-    parser.set_language(rust_lang).ok()?;
+    let rust_lang = tree_sitter_rust::language();
+    parser.set_language(&rust_lang).ok()?;
 
-    let tree = parser.parse(source.as_bytes(), None)?;
+    let tree = parser.parse(source, None)?;
     let root_node = tree.root_node();
 
     // Query for interesting Rust constructs
@@ -112,7 +113,7 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
             name: (identifier) @mod.name) @mod.def
     "#;
 
-    let query = Query::new(rust_lang, query_source).ok()?;
+    let query = Query::new(&rust_lang, query_source).ok()?;
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, root_node, source.as_bytes());
 
@@ -130,13 +131,13 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
             let (node_type, name) = if capture_name.ends_with(".def") {
                 // This is a definition node, find its name from other captures
                 let name_text = if capture_name.starts_with("fn") {
-                    Some(get_text_for_node(source, node, "fn.name", &match_, &query))
+                    get_text_for_node(source, "fn.name", &match_, &query)
                 } else if capture_name.starts_with("struct") {
-                    Some(get_text_for_node(source, node, "struct.name", &match_, &query))
+                    get_text_for_node(source, "struct.name", &match_, &query)
                 } else if capture_name.starts_with("impl") {
-                    Some(get_text_for_node(source, node, "impl.type", &match_, &query))
+                    get_text_for_node(source, "impl.type", &match_, &query)
                 } else if capture_name.starts_with("mod") {
-                    Some(get_text_for_node(source, node, "mod.name", &match_, &query))
+                    get_text_for_node(source, "mod.name", &match_, &query)
                 } else {
                     None
                 };
@@ -174,9 +175,8 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
 /// Helper function to extract text for a named capture.
 fn get_text_for_node(
     source: &str,
-    _parent: tree_house::Node,
     capture_name: &str,
-    match_: &tree_house::QueryMatch,
+    match_: &tree_sitter::QueryMatch,
     query: &Query,
 ) -> Option<String> {
     for capture in match_.captures {
@@ -195,7 +195,10 @@ mod tests {
 
     #[test]
     fn test_language_detection() {
-        assert_eq!(Language::from_path(&PathBuf::from("foo.rs")), Language::Rust);
+        assert_eq!(
+            Language::from_path(&PathBuf::from("foo.rs")),
+            Language::Rust
+        );
         assert_eq!(
             Language::from_path(&PathBuf::from("bar.py")),
             Language::Python
