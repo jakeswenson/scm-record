@@ -115,33 +115,57 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
     let query = Query::new(&ts_language, query_source).ok()?;
     let mut cursor = QueryCursor::new();
+    let mut captures = cursor.captures(&query, root_node, source.as_bytes());
 
     let mut nodes = Vec::new();
+    let mut seen_nodes = std::collections::HashSet::new();
 
-    // Use captures() which provides a simpler API than matches()
-    for (match_, capture_index) in cursor.captures(&query, root_node, source.as_bytes()) {
-        let capture = &match_.captures[capture_index];
-        let node = capture.node;
-        let start_line = node.start_position().row;
-        let end_line = node.start_position().row;
+    // Manually iterate using the streaming iterator pattern
+    loop {
+        // Try to get the next capture
+        let capture_data = {
+            // This scope ensures we don't hold onto any references
+            use streaming_iterator::StreamingIterator;
 
-        let capture_name = query.capture_names()[capture.index as usize];
+            match captures.next() {
+                Some((qmatch, capture_index)) => {
+                    let capture = &qmatch.captures[capture_index];
+                    let node_id = capture.node.id();
+                    let node_range = capture.node.range();
+                    let capture_idx = capture.index;
 
-        if !capture_name.ends_with(".def") {
-            continue; // Skip name captures, we only want definitions
+                    Some((node_id, node_range, capture_idx))
+                }
+                None => None,
+            }
+        };
+
+        match capture_data {
+            Some((node_id, node_range, capture_index)) => {
+                let capture_name = query.capture_names()[capture_index as usize];
+
+                // Only process definition captures, and only once per node
+                if capture_name.ends_with(".def") && !seen_nodes.contains(&node_id) {
+                    seen_nodes.insert(node_id);
+
+                    let start_line = node_range.start_point.row;
+                    let end_line = node_range.end_point.row;
+
+                    // Extract name from the source text
+                    let name_text = extract_name_from_range(source, node_range.start_byte, node_range.end_byte);
+                    let node_type = parse_node_type(&capture_name);
+
+                    nodes.push(SemanticNode {
+                        node_type,
+                        name: name_text,
+                        start_line,
+                        end_line,
+                        children: Vec::new(), // TODO: Parse nested structures
+                    });
+                }
+            }
+            None => break,
         }
-
-        // Find the name for this definition
-        let name_text = get_text_for_definition(source, &query, &node, &capture_name);
-        let node_type = parse_node_type(&capture_name);
-
-        nodes.push(SemanticNode {
-            node_type,
-            name: name_text,
-            start_line,
-            end_line,
-            children: Vec::new(), // TODO: Parse nested structures
-        });
     }
 
     Some(nodes)
@@ -174,24 +198,47 @@ fn parse_node_type(capture_name: &str) -> SemanticNodeType {
     }
 }
 
-/// Helper function to extract text for a definition node.
-/// This looks at child nodes to find the name.
-fn get_text_for_definition(
-    source: &str,
-    _query: &Query,
-    node: &tree_sitter::Node,
-    _def_capture_name: &str,
-) -> Option<String> {
-    // For now, we'll try to find a child node that looks like a name
-    // This is a simplified approach - ideally we'd use the query captures
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind().contains("identifier") || child.kind().contains("name") {
-                let text = &source[child.byte_range()];
-                return Some(text.to_string());
+/// Helper function to extract a name from a byte range in the source.
+/// This is a simple heuristic that looks for identifier-like tokens.
+fn extract_name_from_range(source: &str, start_byte: usize, end_byte: usize) -> Option<String> {
+    let text = &source[start_byte..end_byte];
+
+    // Try to find the first identifier-like word (letters, numbers, underscores)
+    for word in text.split_whitespace() {
+        // Skip keywords and common syntax elements
+        if matches!(
+            word,
+            "fn" | "function"
+                | "struct"
+                | "class"
+                | "impl"
+                | "mod"
+                | "module"
+                | "def"
+                | "pub"
+                | "private"
+                | "public"
+                | "{"
+                | "}"
+                | "("
+                | ")"
+        ) {
+            continue;
+        }
+
+        // Look for identifier-like patterns
+        if word.chars().all(|c| c.is_alphanumeric() || c == '_') && !word.is_empty() {
+            return Some(word.to_string());
+        }
+
+        // Handle cases like "Point {" or "new()"
+        if let Some(name) = word.split(|c: char| !c.is_alphanumeric() && c != '_').next() {
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return Some(name.to_string());
             }
         }
     }
+
     None
 }
 
