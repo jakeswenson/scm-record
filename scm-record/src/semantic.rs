@@ -46,8 +46,6 @@ pub struct SemanticNode {
 pub enum Language {
     /// Rust programming language
     Rust,
-    /// Kotlin programming language
-    Kotlin,
     /// Java programming language
     Java,
     /// HCL (HashiCorp Configuration Language)
@@ -63,7 +61,6 @@ impl Language {
     pub fn from_path(path: &Path) -> Self {
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("rs") => Language::Rust,
-            Some("kt") | Some("kts") => Language::Kotlin,
             Some("java") => Language::Java,
             Some("hcl") | Some("tf") | Some("tfvars") => Language::Hcl,
             Some("py") | Some("pyw") => Language::Python,
@@ -75,7 +72,7 @@ impl Language {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            Language::Rust | Language::Kotlin | Language::Java | Language::Hcl | Language::Python
+            Language::Rust | Language::Java | Language::Hcl | Language::Python
         )
     }
 
@@ -83,14 +80,6 @@ impl Language {
     fn tree_sitter_language(&self) -> Option<TSLanguage> {
         match self {
             Language::Rust => Some(unsafe { tree_sitter_rust::LANGUAGE.into() }),
-            Language::Kotlin => {
-                // tree-sitter-kotlin may use a different version of tree-sitter
-                // We convert it by transmuting the underlying pointer
-                let lang = tree_sitter_kotlin::language();
-                Some(unsafe {
-                    std::mem::transmute(lang)
-                })
-            }
             Language::Java => Some(unsafe { tree_sitter_java::LANGUAGE.into() }),
             Language::Hcl => Some(tree_sitter_hcl::LANGUAGE.into()),
             Language::Python => Some(unsafe { tree_sitter_python::LANGUAGE.into() }),
@@ -183,7 +172,6 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 fn get_query_for_language(language: Language) -> Option<&'static str> {
     match language {
         Language::Rust => Some(RUST_QUERY),
-        Language::Kotlin => Some(KOTLIN_QUERY),
         Language::Java => Some(JAVA_QUERY),
         Language::Hcl => Some(HCL_QUERY),
         Language::Python => Some(PYTHON_QUERY),
@@ -266,14 +254,6 @@ const RUST_QUERY: &str = r#"
     name: (identifier) @mod.name) @mod.def
 "#;
 
-const KOTLIN_QUERY: &str = r#"
-(function_declaration
-    (simple_identifier) @function.name) @function.def
-
-(class_declaration
-    (type_identifier) @class.name) @class.def
-"#;
-
 const JAVA_QUERY: &str = r#"
 (method_declaration
     name: (identifier) @function.name) @function.def
@@ -311,10 +291,6 @@ mod tests {
             Language::Python
         );
         assert_eq!(
-            Language::from_path(&PathBuf::from("baz.kt")),
-            Language::Kotlin
-        );
-        assert_eq!(
             Language::from_path(&PathBuf::from("qux.java")),
             Language::Java
         );
@@ -331,7 +307,6 @@ mod tests {
     #[test]
     fn test_language_support() {
         assert!(Language::Rust.is_supported());
-        assert!(Language::Kotlin.is_supported());
         assert!(Language::Java.is_supported());
         assert!(Language::Hcl.is_supported());
         assert!(Language::Python.is_supported());
