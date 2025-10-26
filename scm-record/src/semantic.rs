@@ -128,13 +128,14 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
             use streaming_iterator::StreamingIterator;
 
             match captures.next() {
-                Some((qmatch, capture_index)) => {
-                    let capture = &qmatch.captures[capture_index];
+                Some((qmatch, capture_idx)) => {
+                    // capture_idx tells us which capture in the match
+                    let capture = qmatch.captures.get(capture_idx)?;
                     let node_id = capture.node.id();
                     let node_range = capture.node.range();
-                    let capture_idx = capture.index;
+                    let capture_index = capture.index;
 
-                    Some((node_id, node_range, capture_idx))
+                    Some((node_id, node_range, capture_index))
                 }
                 None => None,
             }
