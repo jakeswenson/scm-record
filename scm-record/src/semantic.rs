@@ -54,8 +54,6 @@ pub enum Language {
     Hcl,
     /// Python programming language
     Python,
-    /// Nushell scripting language
-    Nushell,
     /// Unknown or unsupported language
     Unknown,
 }
@@ -69,7 +67,6 @@ impl Language {
             Some("java") => Language::Java,
             Some("hcl") | Some("tf") | Some("tfvars") => Language::Hcl,
             Some("py") | Some("pyw") => Language::Python,
-            Some("nu") => Language::Nushell,
             _ => Language::Unknown,
         }
     }
@@ -78,12 +75,7 @@ impl Language {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            Language::Rust
-                | Language::Kotlin
-                | Language::Java
-                | Language::Hcl
-                | Language::Python
-                | Language::Nushell
+            Language::Rust | Language::Kotlin | Language::Java | Language::Hcl | Language::Python
         )
     }
 
@@ -95,7 +87,6 @@ impl Language {
             Language::Java => Some(unsafe { tree_sitter_java::LANGUAGE.into() }),
             Language::Hcl => Some(unsafe { tree_sitter_hcl::LANGUAGE.into() }),
             Language::Python => Some(unsafe { tree_sitter_python::LANGUAGE.into() }),
-            Language::Nushell => Some(unsafe { tree_sitter_nu::LANGUAGE.into() }),
             Language::Unknown => None,
         }
     }
@@ -160,7 +151,6 @@ fn get_query_for_language(language: Language) -> Option<&'static str> {
         Language::Java => Some(JAVA_QUERY),
         Language::Hcl => Some(HCL_QUERY),
         Language::Python => Some(PYTHON_QUERY),
-        Language::Nushell => Some(NUSHELL_QUERY),
         Language::Unknown => None,
     }
 }
@@ -260,11 +250,6 @@ const PYTHON_QUERY: &str = r#"
     name: (identifier) @class.name) @class.def
 "#;
 
-const NUSHELL_QUERY: &str = r#"
-(decl_def
-    (cmd_identifier) @function.name) @function.def
-"#;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,10 +278,6 @@ mod tests {
             Language::Hcl
         );
         assert_eq!(
-            Language::from_path(&PathBuf::from("script.nu")),
-            Language::Nushell
-        );
-        assert_eq!(
             Language::from_path(&PathBuf::from("unknown.txt")),
             Language::Unknown
         );
@@ -309,7 +290,6 @@ mod tests {
         assert!(Language::Java.is_supported());
         assert!(Language::Hcl.is_supported());
         assert!(Language::Python.is_supported());
-        assert!(Language::Nushell.is_supported());
         assert!(!Language::Unknown.is_supported());
     }
 
