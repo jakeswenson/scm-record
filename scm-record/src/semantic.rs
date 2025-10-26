@@ -118,49 +118,30 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
     let mut nodes = Vec::new();
 
-    // Collect matches - we need to gather the match data before the cursor moves
-    // QueryMatches uses the StreamingIterator trait which requires advance() + get()
-    let mut all_matches = Vec::new();
-    {
-        let mut query_matches = cursor.matches(&query, root_node, source.as_bytes());
+    // Use captures() which provides a simpler API than matches()
+    for (match_, capture_index) in cursor.captures(&query, root_node, source.as_bytes()) {
+        let capture = &match_.captures[capture_index];
+        let node = capture.node;
+        let start_line = node.start_position().row;
+        let end_line = node.start_position().row;
 
-        // Use advance() and get() pattern from StreamingIterator
-        query_matches.advance();
-        while let Some(qmatch) = query_matches.get() {
-            // Copy the data we need from this match
-            let captures: Vec<_> = qmatch
-                .captures
-                .iter()
-                .map(|c| (c.node, c.index))
-                .collect();
-            all_matches.push(captures);
-            query_matches.advance();
+        let capture_name = query.capture_names()[capture.index as usize];
+
+        if !capture_name.ends_with(".def") {
+            continue; // Skip name captures, we only want definitions
         }
-    }
 
-    for captures in all_matches {
-        for (node, capture_index) in captures {
-            let start_line = node.start_position().row;
-            let end_line = node.end_position().row;
+        // Find the name for this definition
+        let name_text = get_text_for_definition(source, &query, &node, &capture_name);
+        let node_type = parse_node_type(&capture_name);
 
-            let capture_name = query.capture_names()[capture_index as usize];
-
-            if !capture_name.ends_with(".def") {
-                continue; // Skip name captures, we only want definitions
-            }
-
-            // Find the name for this definition
-            let name_text = get_text_for_definition(source, &query, &node, &capture_name);
-            let node_type = parse_node_type(&capture_name);
-
-            nodes.push(SemanticNode {
-                node_type,
-                name: name_text,
-                start_line,
-                end_line,
-                children: Vec::new(), // TODO: Parse nested structures
-            });
-        }
+        nodes.push(SemanticNode {
+            node_type,
+            name: name_text,
+            start_line,
+            end_line,
+            children: Vec::new(), // TODO: Parse nested structures
+        });
     }
 
     Some(nodes)
