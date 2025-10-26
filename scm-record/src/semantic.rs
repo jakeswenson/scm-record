@@ -7,8 +7,7 @@
 #![cfg(feature = "tree-sitter")]
 
 use std::path::Path;
-use tree_house_bindings::rust as tree_sitter_rust;
-use tree_sitter::{Parser, Query, QueryCursor};
+use tree_sitter::{Language as TSLanguage, Parser, Query, QueryCursor};
 
 /// Represents the type of a semantic node in the source code.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,12 +46,16 @@ pub struct SemanticNode {
 pub enum Language {
     /// Rust programming language
     Rust,
+    /// Kotlin programming language
+    Kotlin,
+    /// Java programming language
+    Java,
+    /// HCL (HashiCorp Configuration Language)
+    Hcl,
     /// Python programming language
     Python,
-    /// TypeScript
-    TypeScript,
-    /// JavaScript
-    JavaScript,
+    /// Nushell scripting language
+    Nushell,
     /// Unknown or unsupported language
     Unknown,
 }
@@ -62,9 +65,11 @@ impl Language {
     pub fn from_path(path: &Path) -> Self {
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("rs") => Language::Rust,
-            Some("py") => Language::Python,
-            Some("ts") | Some("tsx") => Language::TypeScript,
-            Some("js") | Some("jsx") => Language::JavaScript,
+            Some("kt") | Some("kts") => Language::Kotlin,
+            Some("java") => Language::Java,
+            Some("hcl") | Some("tf") | Some("tfvars") => Language::Hcl,
+            Some("py") | Some("pyw") => Language::Python,
+            Some("nu") => Language::Nushell,
             _ => Language::Unknown,
         }
     }
@@ -73,8 +78,26 @@ impl Language {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            Language::Rust | Language::Python | Language::TypeScript | Language::JavaScript
+            Language::Rust
+                | Language::Kotlin
+                | Language::Java
+                | Language::Hcl
+                | Language::Python
+                | Language::Nushell
         )
+    }
+
+    /// Get the tree-sitter Language for this language.
+    fn tree_sitter_language(&self) -> Option<TSLanguage> {
+        match self {
+            Language::Rust => Some(unsafe { tree_sitter_rust::LANGUAGE.into() }),
+            Language::Kotlin => Some(unsafe { tree_sitter_kotlin::LANGUAGE.into() }),
+            Language::Java => Some(unsafe { tree_sitter_java::LANGUAGE.into() }),
+            Language::Hcl => Some(unsafe { tree_sitter_hcl::LANGUAGE.into() }),
+            Language::Python => Some(unsafe { tree_sitter_python::LANGUAGE.into() }),
+            Language::Nushell => Some(unsafe { tree_sitter_nu::LANGUAGE.into() }),
+            Language::Unknown => None,
+        }
     }
 }
 
@@ -83,37 +106,16 @@ impl Language {
 /// This function takes source code content and returns a tree of semantic nodes
 /// that can be used for syntax-aware selection.
 pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<SemanticNode>> {
-    match language {
-        Language::Rust => parse_rust(source),
-        _ => None, // Other languages not yet implemented
-    }
-}
+    let ts_language = language.tree_sitter_language()?;
+    let query_source = get_query_for_language(language)?;
 
-/// Parse Rust source code using tree-sitter.
-fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
     let mut parser = Parser::new();
-    let rust_lang = tree_sitter_rust::language();
-    parser.set_language(&rust_lang).ok()?;
+    parser.set_language(&ts_language).ok()?;
 
     let tree = parser.parse(source, None)?;
     let root_node = tree.root_node();
 
-    // Query for interesting Rust constructs
-    let query_source = r#"
-        (function_item
-            name: (identifier) @fn.name) @fn.def
-
-        (struct_item
-            name: (type_identifier) @struct.name) @struct.def
-
-        (impl_item
-            type: (type_identifier) @impl.type) @impl.def
-
-        (mod_item
-            name: (identifier) @mod.name) @mod.def
-    "#;
-
-    let query = Query::new(&rust_lang, query_source).ok()?;
+    let query = Query::new(&ts_language, query_source).ok()?;
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, root_node, source.as_bytes());
 
@@ -125,34 +127,12 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
             let start_line = node.start_position().row;
             let end_line = node.end_position().row;
 
-            // Determine node type based on capture name
             let capture_name = query.capture_names()[capture.index as usize];
 
             let (node_type, name) = if capture_name.ends_with(".def") {
-                // This is a definition node, find its name from other captures
-                let name_text = if capture_name.starts_with("fn") {
-                    get_text_for_node(source, "fn.name", &match_, &query)
-                } else if capture_name.starts_with("struct") {
-                    get_text_for_node(source, "struct.name", &match_, &query)
-                } else if capture_name.starts_with("impl") {
-                    get_text_for_node(source, "impl.type", &match_, &query)
-                } else if capture_name.starts_with("mod") {
-                    get_text_for_node(source, "mod.name", &match_, &query)
-                } else {
-                    None
-                };
+                let name_text = get_text_for_node_in_match(source, &match_, &query, &capture_name);
 
-                let node_type = if capture_name.starts_with("fn") {
-                    SemanticNodeType::Function
-                } else if capture_name.starts_with("struct") {
-                    SemanticNodeType::Struct
-                } else if capture_name.starts_with("impl") {
-                    SemanticNodeType::Impl
-                } else if capture_name.starts_with("mod") {
-                    SemanticNodeType::Module
-                } else {
-                    SemanticNodeType::Other(capture_name.to_string())
-                };
+                let node_type = parse_node_type(&capture_name);
 
                 (node_type, name_text)
             } else {
@@ -172,21 +152,118 @@ fn parse_rust(source: &str) -> Option<Vec<SemanticNode>> {
     Some(nodes)
 }
 
-/// Helper function to extract text for a named capture.
-fn get_text_for_node(
+/// Get the appropriate tree-sitter query for a language.
+fn get_query_for_language(language: Language) -> Option<&'static str> {
+    match language {
+        Language::Rust => Some(RUST_QUERY),
+        Language::Kotlin => Some(KOTLIN_QUERY),
+        Language::Java => Some(JAVA_QUERY),
+        Language::Hcl => Some(HCL_QUERY),
+        Language::Python => Some(PYTHON_QUERY),
+        Language::Nushell => Some(NUSHELL_QUERY),
+        Language::Unknown => None,
+    }
+}
+
+/// Parse node type from capture name.
+fn parse_node_type(capture_name: &str) -> SemanticNodeType {
+    if capture_name.starts_with("fn") || capture_name.starts_with("function") {
+        SemanticNodeType::Function
+    } else if capture_name.starts_with("struct") || capture_name.starts_with("class") {
+        SemanticNodeType::Struct
+    } else if capture_name.starts_with("impl") {
+        SemanticNodeType::Impl
+    } else if capture_name.starts_with("mod") || capture_name.starts_with("module") {
+        SemanticNodeType::Module
+    } else {
+        SemanticNodeType::Other(capture_name.to_string())
+    }
+}
+
+/// Helper function to extract text for a named capture within a match.
+fn get_text_for_node_in_match(
     source: &str,
-    capture_name: &str,
     match_: &tree_sitter::QueryMatch,
     query: &Query,
+    def_capture_name: &str,
 ) -> Option<String> {
+    // Determine the name capture to look for based on the definition capture
+    let name_capture = if def_capture_name.starts_with("fn") {
+        "fn.name"
+    } else if def_capture_name.starts_with("function") {
+        "function.name"
+    } else if def_capture_name.starts_with("struct") {
+        "struct.name"
+    } else if def_capture_name.starts_with("class") {
+        "class.name"
+    } else if def_capture_name.starts_with("impl") {
+        "impl.type"
+    } else if def_capture_name.starts_with("mod") {
+        "mod.name"
+    } else if def_capture_name.starts_with("module") {
+        "module.name"
+    } else {
+        return None;
+    };
+
     for capture in match_.captures {
-        if query.capture_names()[capture.index as usize] == capture_name {
+        if query.capture_names()[capture.index as usize] == name_capture {
             let text = &source[capture.node.byte_range()];
             return Some(text.to_string());
         }
     }
     None
 }
+
+// Tree-sitter query constants for each language
+
+const RUST_QUERY: &str = r#"
+(function_item
+    name: (identifier) @fn.name) @fn.def
+
+(struct_item
+    name: (type_identifier) @struct.name) @struct.def
+
+(impl_item
+    type: (type_identifier) @impl.type) @impl.def
+
+(mod_item
+    name: (identifier) @mod.name) @mod.def
+"#;
+
+const KOTLIN_QUERY: &str = r#"
+(function_declaration
+    (simple_identifier) @function.name) @function.def
+
+(class_declaration
+    (type_identifier) @class.name) @class.def
+"#;
+
+const JAVA_QUERY: &str = r#"
+(method_declaration
+    name: (identifier) @function.name) @function.def
+
+(class_declaration
+    name: (identifier) @class.name) @class.def
+"#;
+
+const HCL_QUERY: &str = r#"
+(block
+    (identifier) @module.name) @module.def
+"#;
+
+const PYTHON_QUERY: &str = r#"
+(function_definition
+    name: (identifier) @function.name) @function.def
+
+(class_definition
+    name: (identifier) @class.name) @class.def
+"#;
+
+const NUSHELL_QUERY: &str = r#"
+(decl_def
+    (cmd_identifier) @function.name) @function.def
+"#;
 
 #[cfg(test)]
 mod tests {
@@ -204,12 +281,20 @@ mod tests {
             Language::Python
         );
         assert_eq!(
-            Language::from_path(&PathBuf::from("baz.ts")),
-            Language::TypeScript
+            Language::from_path(&PathBuf::from("baz.kt")),
+            Language::Kotlin
         );
         assert_eq!(
-            Language::from_path(&PathBuf::from("qux.js")),
-            Language::JavaScript
+            Language::from_path(&PathBuf::from("qux.java")),
+            Language::Java
+        );
+        assert_eq!(
+            Language::from_path(&PathBuf::from("main.tf")),
+            Language::Hcl
+        );
+        assert_eq!(
+            Language::from_path(&PathBuf::from("script.nu")),
+            Language::Nushell
         );
         assert_eq!(
             Language::from_path(&PathBuf::from("unknown.txt")),
@@ -220,9 +305,11 @@ mod tests {
     #[test]
     fn test_language_support() {
         assert!(Language::Rust.is_supported());
+        assert!(Language::Kotlin.is_supported());
+        assert!(Language::Java.is_supported());
+        assert!(Language::Hcl.is_supported());
         assert!(Language::Python.is_supported());
-        assert!(Language::TypeScript.is_supported());
-        assert!(Language::JavaScript.is_supported());
+        assert!(Language::Nushell.is_supported());
         assert!(!Language::Unknown.is_supported());
     }
 

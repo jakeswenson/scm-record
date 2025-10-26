@@ -18,7 +18,15 @@ rust-version = "1.85"
 debug = ["serde"]
 default = ["debug"]
 serde = ["dep:serde", "dep:serde_json"]
-tree-sitter = ["dep:tree-sitter", "dep:tree-house-bindings"]
+tree-sitter = [
+    "dep:tree-sitter",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-kotlin",
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-hcl",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-nu",
+]
 
 [dependencies]
 cassowary = "0.3"
@@ -35,7 +43,12 @@ serde_json = { version = "1.0", optional = true }
 
 # Features: tree-sitter
 tree-sitter = { version = "0.24", optional = true }
-tree-house-bindings = { version = "0.2", optional = true, features = ["rust"] }
+tree-sitter-rust = { version = "0.23", optional = true }
+tree-sitter-kotlin = { version = "0.3", optional = true }
+tree-sitter-java = { version = "0.23", optional = true }
+tree-sitter-hcl = { version = "0.1", optional = true }
+tree-sitter-python = { version = "0.23", optional = true }
+tree-sitter-nu = { version = "0.1", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
