@@ -83,9 +83,9 @@ impl Language {
     fn tree_sitter_language(&self) -> Option<TSLanguage> {
         match self {
             Language::Rust => Some(unsafe { tree_sitter_rust::LANGUAGE.into() }),
-            Language::Kotlin => Some(unsafe { tree_sitter_kotlin::LANGUAGE.into() }),
+            Language::Kotlin => Some(tree_sitter_kotlin::language()),
             Language::Java => Some(unsafe { tree_sitter_java::LANGUAGE.into() }),
-            Language::Hcl => Some(unsafe { tree_sitter_hcl::LANGUAGE.into() }),
+            Language::Hcl => Some(tree_sitter_hcl::language()),
             Language::Python => Some(unsafe { tree_sitter_python::LANGUAGE.into() }),
             Language::Unknown => None,
         }
@@ -112,7 +112,7 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
     let mut nodes = Vec::new();
 
-    for match_ in matches {
+    for match_ in matches.collect::<Vec<_>>() {
         for capture in match_.captures {
             let node = capture.node;
             let start_line = node.start_position().row;
