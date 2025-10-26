@@ -6,17 +6,48 @@ Proposed
 
 ## Context
 
-### Current State
+### Current State (Baseline - Pre-Semantic)
 
-**scm-record** currently uses a 3-level hierarchy for selection:
+**scm-record** currently uses a **diff-first** 3-level hierarchy for selection:
+
 1. **File** level (e.g., `foo/bar.rs`)
-2. **Section** level (contiguous blocks of changes)
-3. **Line** level (individual added/removed lines)
+2. **Section** level (contiguous blocks of changes from the unified diff)
+3. **Line** level (individual added/removed lines within a section)
 
-Users navigate with `hjkl`, toggle with `Space`/`Enter`, and can expand/collapse with `f`. The selection state is tracked via:
+#### How Current Sectioning Works
+
+Sections are determined purely by the **unified diff format**. A section is a contiguous block of changes with surrounding context lines. For example:
+
+```diff
+@@ -10,7 +10,8 @@ impl Foo {
+     fn calculate(&self) -> i32 {
+         let x = self.field1;
+-        let y = x * 2;
++        let y = x * 3;
++        let z = y + 10;
+         return z;
+     }
+@@ -42,5 +43,5 @@ impl Bar {
+     fn process(&mut self) {
+-        self.count += 1;
++        self.count += 2;
+     }
+```
+
+This diff creates **two sections**:
+- Section 1: Lines 10-17 (changes in `Foo::calculate`)
+- Section 2: Lines 42-47 (changes in `Bar::process`)
+
+The sections have **no semantic awareness** - they're purely based on diff proximity, not code structure.
+
+#### Current User Experience
+
+Users navigate with `hjkl`, toggle with `Space`/`Enter`, and expand/collapse with `f`. Selection state is tracked via:
 - `SectionChangedLine` structs with `is_checked: bool` flags
 - `SelectionKey` enum (File/Section/Line) for focus management
 - Tristate checkboxes showing partial selections
+
+**Pain point:** If a single method has changes in multiple non-contiguous locations, they appear as **separate sections** even though they're semantically part of the same method. Users must manually find and toggle each section.
 
 ### Problem Statement
 
@@ -28,21 +59,40 @@ The current line-level selection is primitive. When making commits, developers o
 
 Currently, users must tediously toggle individual lines, which is error-prone and doesn't align with how developers think about code changes.
 
-### Proposed Enhancement
+### Proposed Enhancement: Semantic-First Navigation
 
-Tree-sitter integration would add a **semantic node level** between sections and lines:
+Tree-sitter integration would **replace** diff-first sectioning with a **semantic-first hierarchy**:
 
 ```
 File (foo.rs)
-  └─ Section (lines 42-89)
-      └─ Semantic Node: struct Foo { ... }
-          ├─ Field: pub name: String
-          ├─ Field: age: u32
-          └─ Method: fn new() -> Self { ... }
-              └─ Lines within method
+  ├─ Container: struct Foo { ... }
+  │   ├─ Field: pub name: String
+  │   │   └─ Section (lines 10-12) - diff block with field change
+  │   └─ Field: age: u32
+  │       └─ Section (lines 15-17) - diff block with field change
+  ├─ Container: impl Foo { ... }
+  │   ├─ Method: fn new() -> Self { ... }
+  │   │   └─ Section (lines 45-50) - diff block within method
+  │   └─ Method: fn calculate(&self) -> i32 { ... }
+  │       ├─ Section (lines 60-65) - first diff block in method
+  │       └─ Section (lines 70-75) - second diff block in method
+  └─ Container: Top-level function: fn helper() { ... }
+      └─ Section (lines 100-105) - diff block within function
 ```
 
-This would allow users to select/deselect entire functions, methods, struct definitions, or logical blocks rather than tediously toggling individual lines.
+**Key differences from current approach:**
+
+1. **Containers are primary grouping** - Changes are organized by semantic containers (struct, impl, functions) rather than by diff proximity
+2. **Members within containers** - Methods, fields within their parent containers
+3. **Sections as leaf nodes** - Traditional diff sections become the finest-grained navigation level under their semantic parent
+4. **Cross-version matching** - Containers/members matched between old and new file versions by name
+5. **Hierarchical selection** - Selecting a container selects all its members and sections
+
+**Benefits:**
+- Navigate to "all changes in struct Foo" with one selection
+- Select entire method with all its scattered diff sections
+- Intuitive grouping aligned with code structure
+- Reduces error-prone line-by-line toggling
 
 ## Implementation Complexity Assessment
 
@@ -58,23 +108,72 @@ This is a **complex feature** that requires significant architectural changes.
 
 **2. Data Model Changes**
 
-The current `Section` enum in `types.rs:432` would need restructuring:
+The current `Section` enum in `types.rs:432` would need **complete restructuring** from diff-first to semantic-first:
 
+**Current structure (diff-first):**
 ```rust
-pub enum Section<'a> {
-    Unchanged { lines: Vec<Cow<'a, str>> },
-    Changed { lines: Vec<SectionChangedLine<'a>> },
-    // NEW: Semantic variant needed
-    Semantic {
-        node_type: SemanticNodeType,  // Function, Class, Method, etc.
+File → Vec<Section> → Vec<SectionChangedLine>
+```
+
+**New structure (semantic-first):**
+```rust
+pub struct File<'a> {
+    path: PathBuf,
+    containers: Vec<SemanticContainer<'a>>,
+    // Fallback for non-semantic code or parse failures
+    fallback_sections: Option<Vec<Section<'a>>>,
+}
+
+pub enum SemanticContainer<'a> {
+    Struct {
+        name: String,
+        fields: Vec<SemanticMember<'a>>,
         is_checked: bool,
         is_partial: bool,
-        children: Vec<Section<'a>>,  // Recursive structure
-        lines: Vec<SectionChangedLine<'a>>,
     },
-    // ... existing variants
+    Impl {
+        type_name: String,  // "Foo" for "impl Foo"
+        trait_name: Option<String>,  // Some("Display") for "impl Display for Foo"
+        methods: Vec<SemanticMember<'a>>,
+        is_checked: bool,
+        is_partial: bool,
+    },
+    Function {
+        name: String,
+        sections: Vec<Section<'a>>,
+        is_checked: bool,
+        is_partial: bool,
+    },
+}
+
+pub enum SemanticMember<'a> {
+    Field {
+        name: String,
+        sections: Vec<Section<'a>>,  // Diff blocks for this field
+        is_checked: bool,
+        is_partial: bool,
+    },
+    Method {
+        name: String,
+        sections: Vec<Section<'a>>,  // Diff blocks within this method
+        is_checked: bool,
+        is_partial: bool,
+    },
+}
+
+// Section becomes the leaf node containing actual diff lines
+pub struct Section<'a> {
+    lines: Vec<SectionChangedLine<'a>>,
+    is_checked: bool,
+    is_partial: bool,
 }
 ```
+
+**Key changes:**
+- File contains **containers** (struct/impl/function) not raw sections
+- Containers have **members** (fields/methods)
+- Members have **sections** (traditional diff blocks)
+- **Fallback path**: If semantic parsing fails, use `fallback_sections` with current diff-first behavior
 
 **3. UI State Management** (`ui.rs`)
 - Extend `SelectionKey` enum with `SemanticNode(SemanticNodeKey)`
@@ -82,23 +181,35 @@ pub enum Section<'a> {
 - Update rendering logic to display semantic node boundaries
 - Handle partial selections when some lines in a function are selected
 
-**4. Change Attribution**
-- Parse both old and new file versions
-- Match semantic nodes across diffs (functions may have moved/been renamed)
-- Handle partial function changes (only some lines within a function changed)
-- Deal with syntactically invalid code (incomplete edits, syntax errors)
+**4. Change Attribution and Cross-Version Matching**
+
+This is **critical** for semantic-first navigation:
+
+- **Parse both old and new file versions** with tree-sitter
+- **Match containers/members across versions** to attribute changes correctly
+- **Initial approach**: Name-based matching
+  - `struct Foo` in old version matches `struct Foo` in new version
+  - `impl Foo::calculate` in old matches `impl Foo::calculate` in new
+  - Renamed/moved code appears as delete + add (acceptable for POC)
+- **Future enhancement**: Rename tracking and structural similarity matching
+- **Handle partial changes**: Method exists in both versions but only some lines changed
+- **Handle additions/deletions**: New structs/methods or removed ones
+- **Deal with syntactically invalid code**: Fallback to diff-first when parse fails
+- **Containers as separate units**: In Rust, `struct Foo` and `impl Foo` matched independently (not grouped)
 
 **5. Performance Concerns**
 - Tree-sitter parsing adds latency to UI initialization
 - Large files (>10K lines) may slow down rendering
 - Memory overhead for maintaining parse trees
 
-**6. Edge Cases**
-- Binary files (no semantic structure)
-- File mode changes
-- Mixed changes (some semantic, some non-semantic within same section)
-- Language detection from file extension
-- Fallback when tree-sitter parser unavailable
+**6. Edge Cases and Fallback Strategy**
+- **Binary files**: No semantic structure → fallback to diff-first sectioning
+- **Unsupported languages**: Parser not available → fallback to diff-first sectioning
+- **Syntax errors**: Invalid code that tree-sitter can't parse → fallback to diff-first sectioning
+- **File mode changes**: No code content → fallback to diff-first sectioning
+- **Top-level code**: Module imports, constants, type aliases → fallback to diff-first sectioning at file level
+- **Language detection**: By file extension, shebang, or content analysis
+- **Graceful degradation**: Semantic parsing failure should never break the UI
 
 ## Options Considered
 
@@ -203,110 +314,196 @@ Build custom grammar management inspired by helix's approach, but implemented fr
 
 ## Decision
 
-**Choose Option 6: Built-in grammar management with tree-house**
+**Choose Option 4 (Modified): Build from scratch with tree-sitter + bundled grammar crates**
 
 We will:
-1. Use **tree-house** as the modern tree-sitter Rust API (the gold standard for consuming tree-sitter in Rust)
-2. Build **custom grammar management** inspired by helix's philosophy but implemented from scratch
-3. **No dependencies** on helix-loader or vendoring of helix code
-4. Implement **incrementally**, starting with high-priority languages
-5. Make it **opt-in** via feature flag initially
+1. Use **tree-sitter** core crate directly with individual language grammar crates from crates.io
+2. Bundle **First Wave grammars** as built-in optional dependencies via `tree-sitter` feature flag
+3. **No external grammar fetching** - all grammars bundled with the binary from crates.io
+4. **No dependencies** on helix-loader, tree-house, or other abstraction layers
+5. Implement **incrementally**, starting with First Wave languages (Rust, Kotlin, Java, HCL, Python, Markdown, TOML, YAML)
+6. Make it **opt-in** via `tree-sitter` feature flag
 
 ### Architecture
 
 ```
-scm-record UI → Custom Semantic Builder → tree-house → tree-sitter
-                         ↓
-                Grammar Management Layer
-                (inspired by helix, built in-house)
+┌─────────────────────────────────────────────────────────────┐
+│                      scm-record UI                           │
+│              (File → Container → Member → Section)           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+         ┌─────────────────────────────┐
+         │  Semantic Builder Module    │
+         │  (semantic.rs)               │
+         │  - Detect language           │
+         │  - Parse old & new versions │
+         │  - Match containers/members │
+         │  - Attribute changes         │
+         │  - Build semantic hierarchy  │
+         └─────────┬─────────┬─────────┘
+                   │         │
+         Semantic  │         │  Fallback (parse failure,
+          Success  │         │   unsupported language)
+                   │         │
+                   ▼         ▼
+         ┌─────────────────────────┐  ┌──────────────────┐
+         │ tree-sitter parsers     │  │  Diff-First      │
+         │ (bundled from crates.io)│  │  Sectioning      │
+         │ - tree-sitter-rust      │  │  (traditional)   │
+         │ - tree-sitter-kotlin-ng │  └──────────────────┘
+         │ - tree-sitter-java      │
+         │ - tree-sitter-hcl       │
+         │ - tree-sitter-python    │
+         │ - tree-sitter-md        │
+         │ - tree-sitter-toml      │
+         │ - tree-sitter-yaml      │
+         └─────────────────────────┘
 ```
+
+**Data Flow:**
+1. UI receives diff from version control
+2. Semantic Builder detects language by file extension
+3. If language supported: Parse both old and new file versions with appropriate tree-sitter parser
+4. If successful: Match containers/members, build semantic hierarchy
+5. If failed or unsupported: Fall back to traditional diff-first sectioning
+6. UI renders either semantic-first or diff-first hierarchy
 
 ### Why This Approach?
 
-**tree-house advantages:**
-- Modern, maintained, actively developed
-- Clean abstraction over tree-sitter-rs
-- Well-designed for building tools
-- Strong community support
-- The gold standard for consuming tree-sitter in Rust
+**Bundled crates.io grammars advantages:**
+- **Zero external fetching**: All grammars bundled as Cargo dependencies
+- **Reliable builds**: No network dependency during compilation
+- **Version-locked**: Grammar versions pinned in Cargo.toml
+- **Minimal complexity**: No custom grammar management layer needed
+- **Cargo feature flags**: Users can opt-in via `tree-sitter` feature
+- **Standard Rust ecosystem**: Uses normal dependency resolution
 
-**No helix dependencies because:**
-- Avoid tight coupling to helix's architecture
-- Keep scm-record lightweight and focused
-- Maintain full control over grammar management
-- Better suited to interactive diff selection vs. text editing
+**Direct tree-sitter usage:**
+- **Full control**: Direct API access without abstraction layers
+- **Minimal dependencies**: Only tree-sitter + language crates
+- **Well-documented**: tree-sitter API is stable and well-documented
+- **No experimental dependencies**: Avoid early-stage abstractions like tree-house
 
-**Custom grammar management because:**
-- Full control over which grammars to bundle
-- Can optimize for scm-record's specific use case
-- Learn from helix's proven patterns without direct dependency
-- Flexibility to evolve independently
+**Incremental rollout:**
+- **Start small**: First Wave covers 8 core languages
+- **Prove value**: Get semantic navigation working for high-value languages first
+- **Expand later**: Add Second Wave and Future Waves as needed
+- **Low risk**: Feature flag allows disabling if issues arise
+
+### Semantic-First Design Decisions
+
+**Container Grouping Strategy:**
+- **Rust**: `struct Foo` and `impl Foo` are **separate containers** (not grouped together)
+  - `struct Foo { }` is one container with its fields
+  - `impl Foo { }` is a separate container with its methods
+  - `impl Display for Foo { }` is yet another separate container
+  - This maintains tree-sitter's natural AST structure
+- **Top-level functions**: Each function is its own **container**
+- **Top-level non-functional code**: Imports, constants, type aliases fall back to diff-first sectioning
+
+**Matching Strategy:**
+- **Initial implementation**: Name-based matching
+  - `struct Foo` matches by name "Foo"
+  - `impl Foo::method_name` matches by type + method name
+  - Renamed/moved code shows as delete + add (acceptable for POC)
+- **Future enhancement**: Structural similarity and rename tracking
+
+**Fallback Strategy:**
+- **Always available**: Traditional diff-first sectioning as fallback
+- **Triggers**: Unsupported language, syntax errors, parse failures, binary files
+- **Graceful degradation**: Semantic parsing failure never breaks the UI
+- **Mixed mode**: File can have both semantic containers (for parsed code) and fallback sections (for unparsed code)
 
 ## Implementation Plan
 
 ### Language Priorities
 
-Implement support for languages in this priority order:
+Languages will be implemented in waves, starting with those available on crates.io as built-in dependencies.
 
-1. **Rust** (priority #1 - highest value)
-2. **OpenTofu/Terraform**
-3. **Markdown**
-4. **TypeScript & JavaScript**
-5. **HTML**
-6. **Svelte**
-7. **Python**
-8. **Zig**
-9. **Swift**
-10. **Java**
-11. **Lean4**
-12. **Haskell**
-13. **Kotlin**
-14. **Scala**
-15. **TOML**
-16. **YAML**
-17. **JSON**
+#### First Wave: Built-in Support (from crates.io)
+
+These languages will be **bundled with the binary** as optional dependencies via the `tree-sitter` feature flag:
+
+1. **Rust** - `tree-sitter-rust = "0.24"` (priority #1 - highest value)
+2. **Kotlin** - `tree-sitter-kotlin-ng = "1.1.0"`
+3. **Java** - `tree-sitter-java = "0.23.5"`
+4. **HCL** (Terraform/OpenTofu) - `tree-sitter-hcl = "1.1"`
+5. **Python** - `tree-sitter-python = "0.25"`
+6. **Markdown** - `tree-sitter-md = "0.5.1"`
+7. **TOML** - `tree-sitter-toml = "0.20.0"`
+8. **YAML** - `tree-sitter-yaml = "0.7.2"`
+
+**Rationale:** These languages are:
+- Available on crates.io with stable versions
+- Cover primary use cases (systems programming, config files, documentation, general-purpose languages)
+- Can be built and distributed without external grammar fetching
+
+#### Second Wave: Additional Languages
+
+9. **Swift** - `tree-sitter-swift = "0.7.1"` (tier-two grammar, not in tree-sitter-grammars tier-one)
+10. **TypeScript & JavaScript**
+11. **HTML**
+12. **Svelte**
+
+#### Future Waves
+
+- **Zig**
+- **Lean4**
+- **Haskell**
+- **Scala**
+- **JSON**
+- Others as needed
 
 ### Proof of Concept
 
 **Scope:**
-- Start with Rust + 2-3 other high-priority languages (e.g., TypeScript, Python)
-- Implement minimal grammar management (fetch + compile grammars)
-- Build basic semantic tree integration into `Section` enum
-- Add UI navigation for semantic nodes
+- Start with **First Wave languages** (Rust, Kotlin, Java, HCL, Python, Markdown, TOML, YAML)
+- All grammars available from crates.io as built-in dependencies
+- Build semantic-first data model (File → Container → Member → Section)
+- Implement cross-version matching (name-based initially)
+- Add UI navigation for semantic hierarchy
+- Implement fallback to diff-first sectioning
 - Must be manually testable
 
 **Success Criteria:**
-- Can select/deselect entire Rust functions via keyboard
+- Can select/deselect entire Rust structs, impls, and functions via keyboard
+- Can navigate hierarchically (File → Container → Member → Section)
 - Performance acceptable for files up to 1000 lines
-- Graceful fallback when parser unavailable
+- Graceful fallback to diff-first sectioning when parser fails or language unsupported
 
 ### Phase 1: Foundation
 
 **Tasks:**
-- [ ] Add `tree-house` dependency
+- [ ] Add First Wave tree-sitter language crates as optional dependencies (already in Cargo.toml)
 - [ ] Create `semantic.rs` module for tree-sitter integration
-- [ ] Implement grammar management system (fetch, compile, load)
-- [ ] Add file language detection (by extension, shebang, etc.)
-- [ ] Implement parser loading for initial language set
-- [ ] Write unit tests for basic parsing
+- [ ] Implement language detection (by file extension: .rs, .kt, .java, .tf, .py, .md, .toml, .yaml/.yml)
+- [ ] Implement parser initialization for First Wave languages
+- [ ] Build cross-version parsing (parse both old and new file versions)
+- [ ] Write unit tests for basic parsing and language detection
 
 ### Phase 2: Data Model
 
 **Tasks:**
-- [ ] Extend `Section` enum with semantic variant
-- [ ] Update serialization/deserialization
-- [ ] Modify `SectionChangedLine` to track semantic parent
-- [ ] Add semantic node metadata (type, name, range)
-- [ ] Handle recursive semantic tree structures
+- [ ] Create `SemanticContainer` enum (Struct/Impl/Function variants)
+- [ ] Create `SemanticMember` enum (Field/Method variants)
+- [ ] Restructure `File` to support both containers and fallback_sections
+- [ ] Update `Section` to be a leaf node in the hierarchy
+- [ ] Add selection state tracking (is_checked, is_partial) at each level
+- [ ] Update serialization/deserialization for new data model
+- [ ] Implement hierarchical selection propagation (selecting container selects all members)
 
 ### Phase 3: UI Integration
 
 **Tasks:**
-- [ ] Add `SemanticNode` variant to `SelectionKey`
-- [ ] Extend navigation logic (inner/outer/next/prev)
-- [ ] Update rendering to show semantic boundaries
-- [ ] Add visual indicators for function/class/method nodes
-- [ ] Implement keyboard shortcuts for semantic navigation
+- [ ] Extend `SelectionKey` enum with Container/Member/Section variants
+- [ ] Update navigation logic to traverse semantic hierarchy (File → Container → Member → Section)
+- [ ] Implement `select_inner`/`select_outer` for hierarchical navigation
+- [ ] Update rendering to show semantic boundaries and structure
+- [ ] Add visual indicators for containers (struct/impl/function), members (method/field), and sections
+- [ ] Implement hierarchical selection toggling (Space/Enter on container selects all members)
+- [ ] Update expand/collapse logic to work with semantic hierarchy
+- [ ] Handle mixed mode rendering (semantic containers + fallback sections)
 
 ### Phase 4: Polish and Testing
 
@@ -324,6 +521,52 @@ Implement support for languages in this priority order:
 - [ ] Add remaining languages from priority list
 - [ ] Test semantic selection across all supported languages
 - [ ] Optimize grammar loading for startup performance
+
+## Fallback Strategy
+
+The semantic-first navigation is **optional** and will gracefully fall back to the traditional diff-first sectioning in several scenarios:
+
+### When Fallback Occurs
+
+1. **Unsupported Language**: File extension doesn't match any available tree-sitter grammar
+2. **Parser Unavailable**: Grammar not installed or failed to load
+3. **Syntax Errors**: Code contains parse errors (incomplete edits, invalid syntax)
+4. **Binary Files**: Non-text files with no semantic structure
+5. **File Mode Changes**: Permissions or mode changes without content changes
+6. **Parse Timeout**: Parsing takes too long (performance safeguard)
+
+### How Fallback Works
+
+**Data Model:**
+```rust
+pub struct File<'a> {
+    path: PathBuf,
+    // Semantic containers (if parsing succeeded)
+    containers: Vec<SemanticContainer<'a>>,
+    // Fallback sections (if parsing failed or for non-semantic code)
+    fallback_sections: Option<Vec<Section<'a>>>,
+}
+```
+
+**Rendering Logic:**
+- If `containers` is non-empty: Render semantic-first hierarchy
+- If `containers` is empty but `fallback_sections` is present: Render traditional diff-first sections
+- **Mixed mode possible**: Some containers parsed semantically, other code falls back
+
+**User Experience:**
+- Fallback is **transparent** - UI still works, just without semantic grouping
+- No error messages for normal fallback scenarios
+- Configuration option to disable semantic parsing entirely (always use diff-first)
+
+### Top-Level Code Handling
+
+For code that doesn't fit into semantic containers:
+- **Module imports** (`use foo::bar;`) → Fallback sections at file level
+- **Module constants** (`const MAX: usize = 100;`) → Fallback sections at file level
+- **Type aliases** (`type Result<T> = ...;`) → Fallback sections at file level
+- **Top-level functions**: Treated as semantic **containers** (each function is a container)
+
+This ensures all code is always selectable, whether semantic parsing succeeds or not.
 
 ## Consequences
 
