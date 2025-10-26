@@ -119,22 +119,22 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
     let mut nodes = Vec::new();
 
     // Collect matches - we need to gather the match data before the cursor moves
+    // QueryMatches uses the StreamingIterator trait which requires advance() + get()
     let mut all_matches = Vec::new();
     {
         let mut query_matches = cursor.matches(&query, root_node, source.as_bytes());
-        loop {
-            match query_matches.next() {
-                Some(qmatch) => {
-                    // Copy the data we need from this match
-                    let captures: Vec<_> = qmatch
-                        .captures
-                        .iter()
-                        .map(|c| (c.node, c.index))
-                        .collect();
-                    all_matches.push(captures);
-                }
-                None => break,
-            }
+
+        // Use advance() and get() pattern from StreamingIterator
+        query_matches.advance();
+        while let Some(qmatch) = query_matches.get() {
+            // Copy the data we need from this match
+            let captures: Vec<_> = qmatch
+                .captures
+                .iter()
+                .map(|c| (c.node, c.index))
+                .collect();
+            all_matches.push(captures);
+            query_matches.advance();
         }
     }
 
