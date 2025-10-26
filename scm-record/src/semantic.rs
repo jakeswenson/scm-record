@@ -115,32 +115,47 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
     let query = Query::new(&ts_language, query_source).ok()?;
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, root_node, source.as_bytes());
 
     let mut nodes = Vec::new();
 
-    // QueryMatches uses a streaming iterator pattern
-    while let Some(match_) = matches.next() {
-        for capture in match_.captures.iter() {
-            let node = capture.node;
+    // Collect matches - we need to gather the match data before the cursor moves
+    let mut all_matches = Vec::new();
+    {
+        let mut query_matches = cursor.matches(&query, root_node, source.as_bytes());
+        loop {
+            match query_matches.next() {
+                Some(qmatch) => {
+                    // Copy the data we need from this match
+                    let captures: Vec<_> = qmatch
+                        .captures
+                        .iter()
+                        .map(|c| (c.node, c.index))
+                        .collect();
+                    all_matches.push(captures);
+                }
+                None => break,
+            }
+        }
+    }
+
+    for captures in all_matches {
+        for (node, capture_index) in captures {
             let start_line = node.start_position().row;
             let end_line = node.end_position().row;
 
-            let capture_name = query.capture_names()[capture.index as usize];
+            let capture_name = query.capture_names()[capture_index as usize];
 
-            let (node_type, name) = if capture_name.ends_with(".def") {
-                let name_text = get_text_for_node_in_match(source, &match_, &query, &capture_name);
-
-                let node_type = parse_node_type(&capture_name);
-
-                (node_type, name_text)
-            } else {
+            if !capture_name.ends_with(".def") {
                 continue; // Skip name captures, we only want definitions
-            };
+            }
+
+            // Find the name for this definition
+            let name_text = get_text_for_definition(source, &query, &node, &capture_name);
+            let node_type = parse_node_type(&capture_name);
 
             nodes.push(SemanticNode {
                 node_type,
-                name,
+                name: name_text,
                 start_line,
                 end_line,
                 children: Vec::new(), // TODO: Parse nested structures
@@ -178,36 +193,22 @@ fn parse_node_type(capture_name: &str) -> SemanticNodeType {
     }
 }
 
-/// Helper function to extract text for a named capture within a match.
-fn get_text_for_node_in_match(
+/// Helper function to extract text for a definition node.
+/// This looks at child nodes to find the name.
+fn get_text_for_definition(
     source: &str,
-    match_: &tree_sitter::QueryMatch,
-    query: &Query,
-    def_capture_name: &str,
+    _query: &Query,
+    node: &tree_sitter::Node,
+    _def_capture_name: &str,
 ) -> Option<String> {
-    // Determine the name capture to look for based on the definition capture
-    let name_capture = if def_capture_name.starts_with("fn") {
-        "fn.name"
-    } else if def_capture_name.starts_with("function") {
-        "function.name"
-    } else if def_capture_name.starts_with("struct") {
-        "struct.name"
-    } else if def_capture_name.starts_with("class") {
-        "class.name"
-    } else if def_capture_name.starts_with("impl") {
-        "impl.type"
-    } else if def_capture_name.starts_with("mod") {
-        "mod.name"
-    } else if def_capture_name.starts_with("module") {
-        "module.name"
-    } else {
-        return None;
-    };
-
-    for capture in match_.captures {
-        if query.capture_names()[capture.index as usize] == name_capture {
-            let text = &source[capture.node.byte_range()];
-            return Some(text.to_string());
+    // For now, we'll try to find a child node that looks like a name
+    // This is a simplified approach - ideally we'd use the query captures
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            if child.kind().contains("identifier") || child.kind().contains("name") {
+                let text = &source[child.byte_range()];
+                return Some(text.to_string());
+            }
         }
     }
     None
