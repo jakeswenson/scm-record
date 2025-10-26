@@ -129,20 +129,25 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
             match captures.next() {
                 Some((qmatch, capture_idx)) => {
-                    // capture_idx tells us which capture in the match
-                    let capture = qmatch.captures.get(capture_idx)?;
-                    let node_id = capture.node.id();
-                    let node_range = capture.node.range();
-                    let capture_index = capture.index;
+                    // capture_idx is a reference to usize, dereference it
+                    let idx = *capture_idx;
+                    // Get the capture from the slice
+                    if let Some(capture) = qmatch.captures.get(idx) {
+                        let node_id = capture.node.id();
+                        let node_range = capture.node.range();
+                        let capture_index = capture.index;
 
-                    Some((node_id, node_range, capture_index))
+                        Some(Some((node_id, node_range, capture_index)))
+                    } else {
+                        Some(None)
+                    }
                 }
                 None => None,
             }
         };
 
         match capture_data {
-            Some((node_id, node_range, capture_index)) => {
+            Some(Some((node_id, node_range, capture_index))) => {
                 let capture_name = query.capture_names()[capture_index as usize];
 
                 // Only process definition captures, and only once per node
@@ -153,7 +158,8 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
                     let end_line = node_range.end_point.row;
 
                     // Extract name from the source text
-                    let name_text = extract_name_from_range(source, node_range.start_byte, node_range.end_byte);
+                    let name_text =
+                        extract_name_from_range(source, node_range.start_byte, node_range.end_byte);
                     let node_type = parse_node_type(&capture_name);
 
                     nodes.push(SemanticNode {
@@ -165,6 +171,7 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
                     });
                 }
             }
+            Some(None) => continue, // Skip invalid captures
             None => break,
         }
     }
