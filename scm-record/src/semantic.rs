@@ -85,10 +85,10 @@ impl Language {
             Language::Rust => Some(unsafe { tree_sitter_rust::LANGUAGE.into() }),
             Language::Kotlin => {
                 // tree-sitter-kotlin may use a different version of tree-sitter
-                // so we need to get the raw pointer and convert it
+                // We convert it by transmuting the underlying pointer
                 let lang = tree_sitter_kotlin::language();
                 Some(unsafe {
-                    TSLanguage::from_raw(lang.into_raw())
+                    std::mem::transmute(lang)
                 })
             }
             Language::Java => Some(unsafe { tree_sitter_java::LANGUAGE.into() }),
@@ -119,8 +119,9 @@ pub fn parse_semantic_nodes(language: Language, source: &str) -> Option<Vec<Sema
 
     let mut nodes = Vec::new();
 
+    // QueryMatches uses a streaming iterator pattern
     while let Some(match_) = matches.next() {
-        for capture in match_.captures {
+        for capture in match_.captures.iter() {
             let node = capture.node;
             let start_line = node.start_position().row;
             let end_line = node.end_position().row;
