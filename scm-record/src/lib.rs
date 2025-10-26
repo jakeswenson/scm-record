@@ -16,6 +16,7 @@ mod util;
 
 pub mod consts;
 pub mod helpers;
+pub mod semantic;
 pub use types::{
     ChangeType, Commit, File, FileMode, RecordError, RecordState, Section, SectionChangedLine,
     SelectedChanges, SelectedContents, Tristate,

@@ -32,6 +32,15 @@ unicode-width = "0.2"
 serde = { version = "1.0", features = ["serde_derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 
+# Tree-sitter for semantic analysis
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-kotlin = "0.3"
+tree-sitter-java = "0.23"
+tree-sitter-hcl = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-nu = "0.1"
+
 [dev-dependencies]
 assert_matches = "1.5"
 criterion = "0.7"
