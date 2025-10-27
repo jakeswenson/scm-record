@@ -29,6 +29,7 @@ qux2
     } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left"),
             right: PathBuf::from("right"),
@@ -84,6 +85,7 @@ qux2
                     ],
                 },
             ],
+            containers: None,
         },
     ]
     "###);
@@ -150,6 +152,7 @@ qux2
     let DiffContext { files, write_root } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left"),
             right: PathBuf::from("right"),
@@ -213,6 +216,7 @@ fn test_diff_absent_left() -> Result<()> {
     } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left"),
             right: PathBuf::from("right"),
@@ -247,6 +251,7 @@ fn test_diff_absent_left() -> Result<()> {
                     ],
                 },
             ],
+            containers: None,
         },
     ]
     "###);
@@ -295,6 +300,7 @@ fn test_diff_absent_right() -> Result<()> {
     } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left"),
             right: PathBuf::from("right"),
@@ -329,6 +335,7 @@ fn test_diff_absent_right() -> Result<()> {
                     ],
                 },
             ],
+            containers: None,
         },
     ]
     "###);
@@ -375,6 +382,7 @@ fn test_reject_diff_non_files() -> Result<()> {
     let result = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left"),
             right: PathBuf::from("right"),
@@ -409,6 +417,7 @@ fn test_diff_files_in_subdirectories() -> Result<()> {
     let DiffContext { files, write_root } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left/foo"),
             right: PathBuf::from("right/foo"),
@@ -473,6 +482,7 @@ fn test_dir_diff_no_changes() -> Result<()> {
     let DiffContext { files, write_root } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: PathBuf::from("left/foo"),
             right: PathBuf::from("right/foo"),
@@ -559,6 +569,7 @@ Hello world 4
     } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: "left".into(),
             right: "right".into(),
@@ -610,6 +621,7 @@ Hello world 4
                     ],
                 },
             ],
+            containers: None,
         },
     ]
     "###);
@@ -694,6 +706,7 @@ Hello world 2
     } = process_opts(
         &filesystem,
         &Opts {
+            verbose: false,
             dir_diff: false,
             left: "left".into(),
             right: "right".into(),
@@ -733,6 +746,7 @@ Hello world 2
                     ],
                 },
             ],
+            containers: None,
         },
     ]
     "###);

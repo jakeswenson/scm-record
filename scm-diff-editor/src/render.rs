@@ -175,8 +175,8 @@ pub fn create_file(
                             trait_name.as_ref().map(|t| format!(" {}", t)).unwrap_or_default(),
                             type_name, methods.len());
                     }
-                    scm_record::SemanticContainer::Function { name, sections, .. } => {
-                        debug!("  - Function '{}' with {} section(s)", name, sections.len());
+                    scm_record::SemanticContainer::Function { name, section_indices, .. } => {
+                        debug!("  - Function '{}' with {} section(s)", name, section_indices.len());
                     }
                 }
             }

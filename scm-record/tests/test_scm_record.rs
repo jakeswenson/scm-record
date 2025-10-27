@@ -20,6 +20,8 @@ fn example_contents() -> RecordState<'static> {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("foo/bar")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![
                     Section::Unchanged {
                         lines: iter::repeat(Cow::Borrowed("this is some text\n"))
@@ -59,6 +61,8 @@ fn example_contents() -> RecordState<'static> {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("baz")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![
                     Section::Unchanged {
                         lines: vec![
@@ -547,6 +551,8 @@ fn test_enter_next() -> TestResult {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("foo")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![Section::Changed {
                     lines: vec![
                         SectionChangedLine {
@@ -566,6 +572,8 @@ fn test_enter_next() -> TestResult {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("bar")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![Section::Changed {
                     lines: vec![
                         SectionChangedLine {
@@ -632,12 +640,16 @@ fn test_file_mode_change() -> TestResult {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("foo")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![],
             },
             File {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("bar")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![Section::FileMode {
                     is_checked: false,
                     mode: FileMode::Unix(0o100755),
@@ -647,6 +659,8 @@ fn test_file_mode_change() -> TestResult {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("qux")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![],
             },
         ],
@@ -671,7 +685,7 @@ fn test_file_mode_change() -> TestResult {
         ],
     );
     let recorder = Recorder::new(state, &mut input);
-    insta::assert_debug_snapshot!(recorder.run()?, @r###"
+    insta::assert_debug_snapshot!(recorder.run()?, @r#"
     RecordState {
         is_read_only: false,
         commits: [
@@ -690,6 +704,7 @@ fn test_file_mode_change() -> TestResult {
                     33188,
                 ),
                 sections: [],
+                containers: None,
             },
             File {
                 old_path: None,
@@ -705,6 +720,7 @@ fn test_file_mode_change() -> TestResult {
                         ),
                     },
                 ],
+                containers: None,
             },
             File {
                 old_path: None,
@@ -713,10 +729,11 @@ fn test_file_mode_change() -> TestResult {
                     33188,
                 ),
                 sections: [],
+                containers: None,
             },
         ],
     }
-    "###);
+    "#);
     insta::assert_snapshot!(before_toggle, @r###"
     "[File] [Edit] [Select] [View]                                                   "
     "( ) foo                                                                      (-)"
@@ -756,6 +773,8 @@ fn test_abbreviate_unchanged_sections() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: (1..=section_length)
@@ -939,6 +958,8 @@ fn test_no_abbreviate_short_unchanged_sections() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: (1..=section_length)
@@ -1016,6 +1037,8 @@ fn test_record_binary_file() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Binary {
                 is_checked: false,
                 old_description: Some(Cow::Owned(make_binary_description("abc123", 123))),
@@ -1047,7 +1070,7 @@ fn test_record_binary_file() -> TestResult {
     "                                                                                "
     "###);
 
-    assert_debug_snapshot!(state, @r###"
+    assert_debug_snapshot!(state, @r#"
     RecordState {
         is_read_only: false,
         commits: [
@@ -1076,10 +1099,11 @@ fn test_record_binary_file() -> TestResult {
                         ),
                     },
                 ],
+                containers: None,
             },
         ],
     }
-    "###);
+    "#);
 
     let (selected, unselected) = state.files[0].get_selected_contents();
     assert_debug_snapshot!(selected, @r###"
@@ -1118,6 +1142,8 @@ fn test_record_binary_file_noop() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Binary {
                 is_checked: false,
                 old_description: Some(Cow::Owned(make_binary_description("abc123", 123))),
@@ -1144,7 +1170,7 @@ fn test_record_binary_file_noop() -> TestResult {
     "                                                                                "
     "###);
 
-    assert_debug_snapshot!(state, @r###"
+    assert_debug_snapshot!(state, @r#"
     RecordState {
         is_read_only: false,
         commits: [
@@ -1173,10 +1199,11 @@ fn test_record_binary_file_noop() -> TestResult {
                         ),
                     },
                 ],
+                containers: None,
             },
         ],
     }
-    "###);
+    "#);
 
     let (selected, unselected) = state.files[0].get_selected_contents();
     assert_debug_snapshot!(selected, @r"
@@ -1213,6 +1240,8 @@ fn test_state_binary_selected_contents() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Changed {
                     lines: vec![SectionChangedLine {
@@ -1314,12 +1343,16 @@ fn test_mouse_click_checkbox() -> TestResult {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("foo")),
                 file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![],
             },
             File {
                 old_path: None,
                 path: Cow::Borrowed(Path::new("bar")),
                 file_mode: FileMode::Absent,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
                 sections: vec![Section::FileMode {
                     is_checked: false,
                     mode: FileMode::FILE_DEFAULT,
@@ -1378,6 +1411,8 @@ fn test_mouse_click_wide_line() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::Absent,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::FileMode {
                     is_checked: false,
@@ -1467,6 +1502,8 @@ fn test_mouse_click_dialog_buttons() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Changed {
                 lines: vec![SectionChangedLine {
                     is_checked: true,
@@ -1519,6 +1556,8 @@ fn test_render_old_path() -> TestResult {
             old_path: Some(Cow::Borrowed(Path::new("foo"))),
             path: Cow::Borrowed(Path::new("bar")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![],
         }],
     };
@@ -2397,7 +2436,7 @@ fn test_read_only() -> TestResult {
     "                                                                                "
     "###);
 
-    insta::assert_debug_snapshot!(state, @r###"
+    insta::assert_debug_snapshot!(state, @r#"
     RecordState {
         is_read_only: true,
         commits: [
@@ -2470,6 +2509,7 @@ fn test_read_only() -> TestResult {
                         ],
                     },
                 ],
+                containers: None,
             },
             File {
                 old_path: None,
@@ -2514,10 +2554,11 @@ fn test_read_only() -> TestResult {
                         ],
                     },
                 ],
+                containers: None,
             },
         ],
     }
-    "###);
+    "#);
 
     Ok(())
 }
@@ -2551,7 +2592,7 @@ fn test_toggle_unchanged_line() -> TestResult {
     "       20 this is some text⏎                                                    "
     "###);
 
-    insta::assert_debug_snapshot!(state, @r###"
+    insta::assert_debug_snapshot!(state, @r#"
     RecordState {
         is_read_only: false,
         commits: [
@@ -2624,6 +2665,7 @@ fn test_toggle_unchanged_line() -> TestResult {
                         ],
                     },
                 ],
+                containers: None,
             },
             File {
                 old_path: None,
@@ -2668,10 +2710,11 @@ fn test_toggle_unchanged_line() -> TestResult {
                         ],
                     },
                 ],
+                containers: None,
             },
         ],
     }
-    "###);
+    "#);
 
     Ok(())
 }
@@ -2685,6 +2728,8 @@ fn test_max_file_view_width() -> TestResult {
             old_path: None,
             path: Cow::Owned("very/".repeat(100).into()),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: vec![Cow::Owned("very ".repeat(100))],
@@ -3580,6 +3625,8 @@ fn test_tabs_in_files() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo/bar")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: iter::repeat(Cow::Borrowed("\tthis is some indented text\n"))
@@ -3688,6 +3735,8 @@ fn test_carriage_return() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Changed {
                 lines: vec![
                     SectionChangedLine {
@@ -3771,6 +3820,8 @@ fn test_some_control_characters() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Changed {
                 lines: vec![SectionChangedLine {
                     is_checked: false,
@@ -3813,6 +3864,8 @@ fn test_non_printing_characters() -> TestResult {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![Section::Changed {
                 lines: vec![SectionChangedLine {
                     is_checked: false,

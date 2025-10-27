@@ -529,16 +529,12 @@ fn calculate_section_line_ranges(sections: &[crate::Section<'_>]) -> Vec<Section
 /// Filter sections that overlap with the given line range.
 ///
 /// A section overlaps if any part of its line range intersects with [start_line, end_line).
-/// Returns a Vec of borrowed sections that fall within or partially overlap the range.
-///
-/// The 'a lifetime is for the data borrowed by Section (e.g., Cow<'a, str>).
-/// The 's lifetime is for the temporary slice borrow, which is separate.
-fn filter_sections_by_range<'a, 's>(
-    sections: &'s [crate::Section<'a>],
-    section_ranges: &'s [SectionLineRange],
+/// Returns a Vec of section indices that fall within or partially overlap the range.
+fn filter_section_indices_by_range(
+    section_ranges: &[SectionLineRange],
     start_line: usize,
     end_line: usize,
-) -> Vec<crate::Section<'a>> {
+) -> Vec<usize> {
     section_ranges
         .iter()
         .filter(|range| {
@@ -546,8 +542,7 @@ fn filter_sections_by_range<'a, 's>(
             // Ranges overlap if: range.start_line < end_line AND start_line < range.end_line
             range.start_line < end_line && start_line < range.end_line
         })
-        .filter_map(|range| sections.get(range.section_index))
-        .cloned()
+        .map(|range| range.section_index)
         .collect()
 }
 
@@ -630,32 +625,30 @@ pub fn try_add_semantic_containers<'a>(
     // Calculate line ranges and build section assignments upfront
     let section_ranges = calculate_section_line_ranges(&file.sections);
 
-    // Build a map of (container_index, member_index_option) -> Vec<Section>
+    // Build a map of (container_index, member_index_option) -> Vec<section_indices>
     // This separates the borrowing from the section building
-    let mut section_assignments: Vec<(usize, Option<usize>, Vec<crate::Section<'a>>)> = Vec::new();
+    let mut section_assignments: Vec<(usize, Option<usize>, Vec<usize>)> = Vec::new();
 
     for (container_idx, container_with_members) in containers_with_members.iter().enumerate() {
         let RustContainerWithMembers { container, members } = container_with_members;
 
         // For functions (no members), assign sections directly to the container
         if matches!(container.kind, RustContainerKind::Function) {
-            let sections = filter_sections_by_range(
-                &file.sections,
+            let section_indices = filter_section_indices_by_range(
                 &section_ranges,
                 container.start_line,
                 container.end_line,
             );
-            section_assignments.push((container_idx, None, sections));
+            section_assignments.push((container_idx, None, section_indices));
         } else {
             // For structs and impls, assign sections to each member
             for (member_idx, member) in members.iter().enumerate() {
-                let sections = filter_sections_by_range(
-                    &file.sections,
+                let section_indices = filter_section_indices_by_range(
                     &section_ranges,
                     member.start_line,
                     member.end_line,
                 );
-                section_assignments.push((container_idx, Some(member_idx), sections));
+                section_assignments.push((container_idx, Some(member_idx), section_indices));
             }
         }
     }
@@ -664,35 +657,72 @@ pub fn try_add_semantic_containers<'a>(
     // The UI currently only understands sections, not semantic containers
     // Future work: Update UI to render semantic hierarchy from file.containers
 
+    // Helper to check if sections contain editable changes
+    let has_editable_sections = |indices: &[usize]| -> bool {
+        indices.iter().any(|&idx| {
+            file.sections
+                .get(idx)
+                .map(|s| s.is_editable())
+                .unwrap_or(false)
+        })
+    };
+
+    // Helper to filter only editable sections
+    let filter_editable_sections = |indices: &[usize]| -> Vec<usize> {
+        indices
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                file.sections
+                    .get(idx)
+                    .map(|s| s.is_editable())
+                    .unwrap_or(false)
+            })
+            .collect()
+    };
+
     // Now build semantic containers using the pre-computed section assignments
-    let semantic_containers: Vec<SemanticContainer<'a>> = containers_with_members
+    let semantic_containers: Vec<SemanticContainer> = containers_with_members
         .into_iter()
         .enumerate()
-        .map(|(container_idx, c)| {
+        .filter_map(|(container_idx, c)| {
             let RustContainerWithMembers { container, members } = c;
 
-            match container.kind {
+            let container = match container.kind {
                 RustContainerKind::Struct => {
-                    let fields = members
+                    let fields: Vec<_> = members
                         .into_iter()
                         .enumerate()
-                        .map(|(member_idx, m)| {
-                            let sections = section_assignments
+                        .filter_map(|(member_idx, m)| {
+                            let section_indices = section_assignments
                                 .iter()
                                 .find(|(c_idx, m_idx, _)| {
                                     *c_idx == container_idx && *m_idx == Some(member_idx)
                                 })
-                                .map(|(_, _, secs)| secs.clone())
+                                .map(|(_, _, indices)| indices.clone())
                                 .unwrap_or_default();
 
-                            SemanticMember::Field {
+                            // Filter to only editable sections
+                            let editable_section_indices = filter_editable_sections(&section_indices);
+
+                            // Filter out members with no editable changes
+                            if editable_section_indices.is_empty() {
+                                return None;
+                            }
+
+                            Some(SemanticMember::Field {
                                 name: m.name,
-                                sections,
+                                section_indices: editable_section_indices,
                                 is_checked: false,
                                 is_partial: false,
-                            }
+                            })
                         })
                         .collect();
+
+                    // Filter out structs with no fields that have changes
+                    if fields.is_empty() {
+                        return None;
+                    }
 
                     SemanticContainer::Struct {
                         name: container.name,
@@ -702,26 +732,39 @@ pub fn try_add_semantic_containers<'a>(
                     }
                 }
                 RustContainerKind::Impl { trait_name } => {
-                    let methods = members
+                    let methods: Vec<_> = members
                         .into_iter()
                         .enumerate()
-                        .map(|(member_idx, m)| {
-                            let sections = section_assignments
+                        .filter_map(|(member_idx, m)| {
+                            let section_indices = section_assignments
                                 .iter()
                                 .find(|(c_idx, m_idx, _)| {
                                     *c_idx == container_idx && *m_idx == Some(member_idx)
                                 })
-                                .map(|(_, _, secs)| secs.clone())
+                                .map(|(_, _, indices)| indices.clone())
                                 .unwrap_or_default();
 
-                            SemanticMember::Method {
+                            // Filter to only editable sections
+                            let editable_section_indices = filter_editable_sections(&section_indices);
+
+                            // Filter out methods with no editable changes
+                            if editable_section_indices.is_empty() {
+                                return None;
+                            }
+
+                            Some(SemanticMember::Method {
                                 name: m.name,
-                                sections,
+                                section_indices: editable_section_indices,
                                 is_checked: false,
                                 is_partial: false,
-                            }
+                            })
                         })
                         .collect();
+
+                    // Filter out impls with no methods that have changes
+                    if methods.is_empty() {
+                        return None;
+                    }
 
                     SemanticContainer::Impl {
                         type_name: container.name,
@@ -732,20 +775,30 @@ pub fn try_add_semantic_containers<'a>(
                     }
                 }
                 RustContainerKind::Function => {
-                    let sections = section_assignments
+                    let section_indices = section_assignments
                         .iter()
                         .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
-                        .map(|(_, _, secs)| secs.clone())
+                        .map(|(_, _, indices)| indices.clone())
                         .unwrap_or_default();
+
+                    // Filter to only editable sections
+                    let editable_section_indices = filter_editable_sections(&section_indices);
+
+                    // Filter out functions with no editable changes
+                    if editable_section_indices.is_empty() {
+                        return None;
+                    }
 
                     SemanticContainer::Function {
                         name: container.name,
-                        sections,
+                        section_indices: editable_section_indices,
                         is_checked: false,
                         is_partial: false,
                     }
                 }
-            }
+            };
+
+            Some(container)
         })
         .collect();
 
@@ -1149,24 +1202,26 @@ impl Point {
     #[cfg(feature = "tree-sitter")]
     #[test]
     fn test_try_add_semantic_containers() {
-        use crate::{File, FileMode, SemanticContainer};
+        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine, SemanticContainer};
         use std::borrow::Cow;
 
+        // Simpler test: just a function with changes
         let old_source = r#"
-struct Point {
-    x: i32,
+fn hello() {
+    println!("old");
+}
+
+fn world() {
+    println!("same");
 }
 "#;
         let new_source = r#"
-struct Point {
-    x: i32,
-    y: i32,
+fn hello() {
+    println!("new");
 }
 
-impl Point {
-    fn new(x: i32, y: i32) -> Self {
-        Point { x, y }
-    }
+fn world() {
+    println!("same");
 }
 "#;
 
@@ -1174,7 +1229,37 @@ impl Point {
             old_path: None,
             path: Cow::Borrowed(std::path::Path::new("test.rs")),
             file_mode: FileMode::FILE_DEFAULT,
-            sections: Vec::new(),
+            sections: vec![
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("\n"),
+                        Cow::Borrowed("fn hello() {\n"),
+                    ],
+                },
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("    println!(\"old\");\n"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("    println!(\"new\");\n"),
+                        },
+                    ],
+                },
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("}\n"),
+                        Cow::Borrowed("\n"),
+                        Cow::Borrowed("fn world() {\n"),
+                        Cow::Borrowed("    println!(\"same\");\n"),
+                        Cow::Borrowed("}\n"),
+                    ],
+                },
+            ],
             containers: None,
         };
 
@@ -1182,36 +1267,22 @@ impl Point {
 
         assert!(enhanced_file.containers.is_some());
         let containers = enhanced_file.containers.unwrap();
-        assert_eq!(containers.len(), 2);
+        // Should only have hello() function, world() is filtered out (no editable changes)
+        assert_eq!(containers.len(), 1);
 
-        // Check struct
+        // Check function
         match &containers[0] {
-            SemanticContainer::Struct {
+            SemanticContainer::Function {
                 name,
-                fields,
+                section_indices,
                 is_checked: _,
                 is_partial: _,
             } => {
-                assert_eq!(name, "Point");
-                assert_eq!(fields.len(), 2); // x and y fields
+                assert_eq!(name, "hello");
+                assert_eq!(section_indices.len(), 1); // Only the Changed section
+                assert_eq!(section_indices[0], 1); // Points to the Changed section at index 1
             }
-            _ => panic!("Expected Struct container"),
-        }
-
-        // Check impl
-        match &containers[1] {
-            SemanticContainer::Impl {
-                type_name,
-                trait_name,
-                methods,
-                is_checked: _,
-                is_partial: _,
-            } => {
-                assert_eq!(type_name, "Point");
-                assert!(trait_name.is_none());
-                assert_eq!(methods.len(), 1); // new method
-            }
-            _ => panic!("Expected Impl container"),
+            _ => panic!("Expected Function container"),
         }
     }
 
@@ -1233,5 +1304,413 @@ impl Point {
 
         // Should return unchanged for unsupported language
         assert!(enhanced_file.containers.is_none());
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_exact_match() {
+        let section_ranges = vec![
+            SectionLineRange {
+                section_index: 0,
+                start_line: 0,
+                end_line: 5,
+            },
+            SectionLineRange {
+                section_index: 1,
+                start_line: 10,
+                end_line: 15,
+            },
+            SectionLineRange {
+                section_index: 2,
+                start_line: 20,
+                end_line: 25,
+            },
+        ];
+
+        let indices = filter_section_indices_by_range(&section_ranges, 10, 15);
+        assert_eq!(indices, vec![1]);
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_overlap() {
+        let section_ranges = vec![
+            SectionLineRange {
+                section_index: 0,
+                start_line: 0,
+                end_line: 10,
+            },
+            SectionLineRange {
+                section_index: 1,
+                start_line: 8,
+                end_line: 15,
+            },
+            SectionLineRange {
+                section_index: 2,
+                start_line: 20,
+                end_line: 25,
+            },
+        ];
+
+        // Range [5, 12) should overlap with sections 0 and 1
+        let indices = filter_section_indices_by_range(&section_ranges, 5, 12);
+        assert_eq!(indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_no_overlap() {
+        let section_ranges = vec![
+            SectionLineRange {
+                section_index: 0,
+                start_line: 0,
+                end_line: 5,
+            },
+            SectionLineRange {
+                section_index: 1,
+                start_line: 10,
+                end_line: 15,
+            },
+        ];
+
+        // Range [6, 9) doesn't overlap with any section
+        let indices = filter_section_indices_by_range(&section_ranges, 6, 9);
+        assert_eq!(indices, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_contains_all() {
+        let section_ranges = vec![
+            SectionLineRange {
+                section_index: 0,
+                start_line: 5,
+                end_line: 10,
+            },
+            SectionLineRange {
+                section_index: 1,
+                start_line: 15,
+                end_line: 20,
+            },
+            SectionLineRange {
+                section_index: 2,
+                start_line: 25,
+                end_line: 30,
+            },
+        ];
+
+        // Range [0, 100) contains all sections
+        let indices = filter_section_indices_by_range(&section_ranges, 0, 100);
+        assert_eq!(indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_partial_overlap_start() {
+        let section_ranges = vec![SectionLineRange {
+            section_index: 0,
+            start_line: 10,
+            end_line: 20,
+        }];
+
+        // Range [5, 15) overlaps with section at the start
+        let indices = filter_section_indices_by_range(&section_ranges, 5, 15);
+        assert_eq!(indices, vec![0]);
+    }
+
+    #[test]
+    fn test_filter_section_indices_by_range_partial_overlap_end() {
+        let section_ranges = vec![SectionLineRange {
+            section_index: 0,
+            start_line: 10,
+            end_line: 20,
+        }];
+
+        // Range [15, 25) overlaps with section at the end
+        let indices = filter_section_indices_by_range(&section_ranges, 15, 25);
+        assert_eq!(indices, vec![0]);
+    }
+
+    #[test]
+    fn test_calculate_section_line_ranges() {
+        use crate::{ChangeType, Section, SectionChangedLine};
+        use std::borrow::Cow;
+
+        let sections = vec![
+            Section::Unchanged {
+                lines: vec![
+                    Cow::Borrowed("line1\n"),
+                    Cow::Borrowed("line2\n"),
+                    Cow::Borrowed("line3\n"),
+                ],
+            },
+            Section::Changed {
+                lines: vec![
+                    SectionChangedLine {
+                        is_checked: false,
+                        change_type: ChangeType::Removed,
+                        line: Cow::Borrowed("old\n"),
+                    },
+                    SectionChangedLine {
+                        is_checked: false,
+                        change_type: ChangeType::Added,
+                        line: Cow::Borrowed("new1\n"),
+                    },
+                    SectionChangedLine {
+                        is_checked: false,
+                        change_type: ChangeType::Added,
+                        line: Cow::Borrowed("new2\n"),
+                    },
+                ],
+            },
+            Section::Unchanged {
+                lines: vec![Cow::Borrowed("line4\n"), Cow::Borrowed("line5\n")],
+            },
+        ];
+
+        let ranges = calculate_section_line_ranges(&sections);
+
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0].section_index, 0);
+        assert_eq!(ranges[0].start_line, 0);
+        assert_eq!(ranges[0].end_line, 3); // 3 lines
+
+        assert_eq!(ranges[1].section_index, 1);
+        assert_eq!(ranges[1].start_line, 3);
+        assert_eq!(ranges[1].end_line, 5); // 2 added lines (removed doesn't count)
+
+        assert_eq!(ranges[2].section_index, 2);
+        assert_eq!(ranges[2].start_line, 5);
+        assert_eq!(ranges[2].end_line, 7); // 2 lines
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_container_filtering_empty_function() {
+        use crate::{File, FileMode, Section};
+        use std::borrow::Cow;
+
+        // Function with only unchanged sections - should be filtered out
+        let source = r#"
+fn unchanged_function() {
+    println!("no changes here");
+}
+"#;
+
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(std::path::Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![Section::Unchanged {
+                lines: vec![
+                    Cow::Borrowed("fn unchanged_function() {\n"),
+                    Cow::Borrowed("    println!(\"no changes here\");\n"),
+                    Cow::Borrowed("}\n"),
+                ],
+            }],
+            containers: None,
+        };
+
+        let result = try_add_semantic_containers(file, source, source);
+
+        // Should have no containers since the function has no editable changes
+        assert!(result.containers.is_none());
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_container_filtering_function_with_changes() {
+        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine};
+        use std::borrow::Cow;
+
+        // Function with changes - should be kept
+        let old_source = r#"
+fn modified_function() {
+    println!("old");
+}
+"#;
+
+        let new_source = r#"
+fn modified_function() {
+    println!("new");
+}
+"#;
+
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(std::path::Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("\n"),
+                        Cow::Borrowed("fn modified_function() {\n"),
+                    ],
+                },
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("    println!(\"old\");\n"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("    println!(\"new\");\n"),
+                        },
+                    ],
+                },
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("}\n"),
+                    ],
+                },
+            ],
+            containers: None,
+        };
+
+        let result = try_add_semantic_containers(file, old_source, new_source);
+
+        // Should have containers with the function
+        assert!(result.containers.is_some());
+        let containers = result.containers.unwrap();
+        assert_eq!(containers.len(), 1);
+
+        match &containers[0] {
+            crate::SemanticContainer::Function { name, section_indices, .. } => {
+                assert_eq!(name, "modified_function");
+                // Should have 1 editable section (the Changed section at index 1)
+                assert_eq!(section_indices.len(), 1);
+                assert_eq!(section_indices[0], 1);
+            }
+            _ => panic!("Expected Function container"),
+        }
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_container_filtering_struct_with_no_field_changes() {
+        use crate::{File, FileMode, Section};
+        use std::borrow::Cow;
+
+        // Struct where fields have no changes - should be filtered out
+        let source = r#"
+struct MyStruct {
+    field1: i32,
+    field2: String,
+}
+"#;
+
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(std::path::Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![Section::Unchanged {
+                lines: vec![
+                    Cow::Borrowed("struct MyStruct {\n"),
+                    Cow::Borrowed("    field1: i32,\n"),
+                    Cow::Borrowed("    field2: String,\n"),
+                    Cow::Borrowed("}\n"),
+                ],
+            }],
+            containers: None,
+        };
+
+        let result = try_add_semantic_containers(file, source, source);
+
+        // Should have no containers since no fields have changes
+        assert!(result.containers.is_none());
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_container_filtering_impl_with_mixed_methods() {
+        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine};
+        use std::borrow::Cow;
+
+        // Impl with one changed method and one unchanged - should keep only changed method
+        let old_source = r#"
+impl MyStruct {
+    fn unchanged_method(&self) {
+        println!("same");
+    }
+
+    fn changed_method(&self) {
+        println!("old");
+    }
+}
+"#;
+
+        let new_source = r#"
+impl MyStruct {
+    fn unchanged_method(&self) {
+        println!("same");
+    }
+
+    fn changed_method(&self) {
+        println!("new");
+    }
+}
+"#;
+
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(std::path::Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("\n"),
+                        Cow::Borrowed("impl MyStruct {\n"),
+                        Cow::Borrowed("    fn unchanged_method(&self) {\n"),
+                        Cow::Borrowed("        println!(\"same\");\n"),
+                        Cow::Borrowed("    }\n"),
+                        Cow::Borrowed("\n"),
+                        Cow::Borrowed("    fn changed_method(&self) {\n"),
+                    ],
+                },
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("        println!(\"old\");\n"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("        println!(\"new\");\n"),
+                        },
+                    ],
+                },
+                Section::Unchanged {
+                    lines: vec![
+                        Cow::Borrowed("    }\n"),
+                        Cow::Borrowed("}\n"),
+                    ],
+                },
+            ],
+            containers: None,
+        };
+
+        let result = try_add_semantic_containers(file, old_source, new_source);
+
+        // Should have containers with the impl
+        assert!(result.containers.is_some());
+        let containers = result.containers.unwrap();
+        assert_eq!(containers.len(), 1);
+
+        match &containers[0] {
+            crate::SemanticContainer::Impl { type_name, methods, .. } => {
+                assert_eq!(type_name, "MyStruct");
+                // Should only have 1 method (the changed one)
+                assert_eq!(methods.len(), 1);
+                match &methods[0] {
+                    crate::SemanticMember::Method { name, section_indices, .. } => {
+                        assert_eq!(name, "changed_method");
+                        assert_eq!(section_indices.len(), 1);
+                        assert_eq!(section_indices[0], 1); // Points to the Changed section
+                    }
+                    _ => panic!("Expected Method member"),
+                }
+            }
+            _ => panic!("Expected Impl container"),
+        }
     }
 }

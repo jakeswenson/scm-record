@@ -15,6 +15,8 @@ fn main() {
             old_path: None,
             path: Cow::Borrowed(Path::new("foo/bar")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: std::iter::repeat(Cow::Borrowed("this is some text\n"))
@@ -55,6 +57,8 @@ fn main() {
             old_path: None,
             path: Cow::Borrowed(Path::new("baz")),
             file_mode: FileMode::FILE_DEFAULT,
+            #[cfg(feature = "tree-sitter")]
+            containers: None,
             sections: vec![
                 Section::Unchanged {
                     lines: vec![

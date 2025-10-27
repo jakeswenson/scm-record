@@ -162,13 +162,13 @@ pub struct Commit {
 #[cfg(feature = "tree-sitter")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub enum SemanticContainer<'a> {
+pub enum SemanticContainer {
     /// A struct definition with its fields.
     Struct {
         /// The name of the struct
         name: String,
         /// The fields defined in this struct
-        fields: Vec<SemanticMember<'a>>,
+        fields: Vec<SemanticMember>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -182,7 +182,7 @@ pub enum SemanticContainer<'a> {
         /// The trait being implemented, if any (e.g., "Display" for "impl Display for Foo")
         trait_name: Option<String>,
         /// The methods defined in this impl block
-        methods: Vec<SemanticMember<'a>>,
+        methods: Vec<SemanticMember>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -193,8 +193,8 @@ pub enum SemanticContainer<'a> {
     Function {
         /// The name of the function
         name: String,
-        /// The diff sections containing changes within this function
-        sections: Vec<Section<'a>>,
+        /// Indices into the file's sections Vec for sections within this function
+        section_indices: Vec<usize>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -209,13 +209,13 @@ pub enum SemanticContainer<'a> {
 #[cfg(feature = "tree-sitter")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub enum SemanticMember<'a> {
+pub enum SemanticMember {
     /// A field within a struct.
     Field {
         /// The name of the field
         name: String,
-        /// The diff sections containing changes to this field
-        sections: Vec<Section<'a>>,
+        /// Indices into the file's sections Vec for sections within this field
+        section_indices: Vec<usize>,
         /// Whether all changes to this field are selected
         is_checked: bool,
         /// Whether some (but not all) changes to this field are selected
@@ -226,8 +226,8 @@ pub enum SemanticMember<'a> {
     Method {
         /// The name of the method
         name: String,
-        /// The diff sections containing changes within this method
-        sections: Vec<Section<'a>>,
+        /// Indices into the file's sections Vec for sections within this method
+        section_indices: Vec<usize>,
         /// Whether all changes to this method are selected
         is_checked: bool,
         /// Whether some (but not all) changes to this method are selected
@@ -236,9 +236,10 @@ pub enum SemanticMember<'a> {
 }
 
 #[cfg(feature = "tree-sitter")]
-impl<'a> SemanticContainer<'a> {
+impl SemanticContainer {
     /// Set the checked state for this container and all its nested items.
-    pub fn set_checked(&mut self, is_checked: bool) {
+    /// Requires access to the file's sections to update the actual section state.
+    pub fn set_checked(&mut self, file_sections: &mut [Section], is_checked: bool) {
         match self {
             SemanticContainer::Struct {
                 fields,
@@ -249,7 +250,7 @@ impl<'a> SemanticContainer<'a> {
                 *container_checked = is_checked;
                 *is_partial = false;
                 for field in fields {
-                    field.set_checked(is_checked);
+                    field.set_checked(file_sections, is_checked);
                 }
             }
             SemanticContainer::Impl {
@@ -261,19 +262,21 @@ impl<'a> SemanticContainer<'a> {
                 *container_checked = is_checked;
                 *is_partial = false;
                 for method in methods {
-                    method.set_checked(is_checked);
+                    method.set_checked(file_sections, is_checked);
                 }
             }
             SemanticContainer::Function {
-                sections,
+                section_indices,
                 is_checked: container_checked,
                 is_partial,
                 ..
             } => {
                 *container_checked = is_checked;
                 *is_partial = false;
-                for section in sections {
-                    section.set_checked(is_checked);
+                for section_idx in section_indices.iter().copied() {
+                    if let Some(section) = file_sections.get_mut(section_idx) {
+                        section.set_checked(is_checked);
+                    }
                 }
             }
         }
@@ -281,26 +284,29 @@ impl<'a> SemanticContainer<'a> {
 }
 
 #[cfg(feature = "tree-sitter")]
-impl<'a> SemanticMember<'a> {
+impl SemanticMember {
     /// Set the checked state for this member and all its sections.
-    pub fn set_checked(&mut self, is_checked: bool) {
+    /// Requires access to the file's sections to update the actual section state.
+    pub fn set_checked(&mut self, file_sections: &mut [Section], is_checked: bool) {
         match self {
             SemanticMember::Field {
-                sections,
+                section_indices,
                 is_checked: member_checked,
                 is_partial,
                 ..
             }
             | SemanticMember::Method {
-                sections,
+                section_indices,
                 is_checked: member_checked,
                 is_partial,
                 ..
             } => {
                 *member_checked = is_checked;
                 *is_partial = false;
-                for section in sections {
-                    section.set_checked(is_checked);
+                for section_idx in section_indices.iter().copied() {
+                    if let Some(section) = file_sections.get_mut(section_idx) {
+                        section.set_checked(is_checked);
+                    }
                 }
             }
         }
@@ -338,7 +344,7 @@ pub struct File<'a> {
     /// organized by code structure. When `None`, falls back to traditional
     /// diff-first sectioning in the `sections` field.
     #[cfg(feature = "tree-sitter")]
-    pub containers: Option<Vec<SemanticContainer<'a>>>,
+    pub containers: Option<Vec<SemanticContainer>>,
 }
 
 /// The changes for a particular file selected as part of the record operation.

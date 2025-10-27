@@ -940,6 +940,96 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     | SelectionKey::Section(_) | SelectionKey::Line(_) => false,
                     SelectionKey::File(selected_file_key) => file_key == selected_file_key,
                 };
+                // Build container views if semantic containers are available
+                #[cfg(feature = "tree-sitter")]
+                let container_views = file.containers.as_ref().map(|containers| {
+                    containers
+                        .iter()
+                        .enumerate()
+                        .map(|(container_idx, container)| {
+                            let container_key = ContainerKey {
+                                commit_idx,
+                                file_idx,
+                                container_idx,
+                            };
+                            let container_toggled = self.container_tristate(container_key).unwrap();
+                            let container_expanded = Tristate::from(
+                                self.expanded_items
+                                    .contains(&SelectionKey::Container(container_key)),
+                            );
+                            let is_focused = match self.selection_key {
+                                SelectionKey::Container(selected_container_key) => {
+                                    selected_container_key == container_key
+                                }
+                                _ => false,
+                            };
+
+                            // Build member views or section views depending on container type
+                            let (member_views, section_views) = match container {
+                                crate::SemanticContainer::Struct { fields, .. } => {
+                                    let member_views = self.make_member_views(
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        fields,
+                                        is_read_only,
+                                    );
+                                    (member_views, Vec::new())
+                                }
+                                crate::SemanticContainer::Impl { methods, .. } => {
+                                    let member_views = self.make_member_views(
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        methods,
+                                        is_read_only,
+                                    );
+                                    (member_views, Vec::new())
+                                }
+                                crate::SemanticContainer::Function { section_indices, .. } => {
+                                    // Functions have sections directly, no members
+                                    let section_views = self.make_section_views_for_indices(
+                                        commit_idx,
+                                        file_idx,
+                                        section_indices,
+                                        is_read_only,
+                                    );
+                                    (Vec::new(), section_views)
+                                }
+                            };
+
+                            ContainerView {
+                                debug: debug_info.is_some(),
+                                container_key,
+                                toggle_box: TristateBox {
+                                    use_unicode: self.use_unicode,
+                                    id: ComponentId::ToggleBox(SelectionKey::Container(
+                                        container_key,
+                                    )),
+                                    icon_style: TristateIconStyle::Check,
+                                    tristate: container_toggled,
+                                    is_focused,
+                                    is_read_only,
+                                },
+                                expand_box: TristateBox {
+                                    use_unicode: self.use_unicode,
+                                    id: ComponentId::ExpandBox(SelectionKey::Container(
+                                        container_key,
+                                    )),
+                                    icon_style: TristateIconStyle::Expand,
+                                    tristate: container_expanded,
+                                    is_focused,
+                                    is_read_only: false,
+                                },
+                                is_header_selected: is_focused,
+                                container,
+                                member_views,
+                                section_views,
+                            }
+                        })
+                        .collect()
+                });
+
                 FileView {
                     debug: debug_info.is_some(),
                     file_key,
@@ -962,6 +1052,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     is_header_selected: is_focused,
                     old_path: file.old_path.as_deref(),
                     path: &file.path,
+                    #[cfg(feature = "tree-sitter")]
+                    container_views,
                     section_views: {
                         let mut section_views = Vec::new();
                         let total_num_sections = file.sections.len();
@@ -1067,6 +1159,197 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         section_views
                     },
                 }
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn make_member_views(
+        &'state self,
+        commit_idx: usize,
+        file_idx: usize,
+        container_idx: usize,
+        members: &'state [crate::SemanticMember],
+        is_read_only: bool,
+    ) -> Vec<MemberView<'state>> {
+        members
+            .iter()
+            .enumerate()
+            .map(|(member_idx, member)| {
+                let member_key = MemberKey {
+                    commit_idx,
+                    file_idx,
+                    container_idx,
+                    member_idx,
+                };
+                let member_toggled = self.member_tristate(member_key).unwrap();
+                let member_expanded = Tristate::from(
+                    self.expanded_items
+                        .contains(&SelectionKey::Member(member_key)),
+                );
+                let is_focused = match self.selection_key {
+                    SelectionKey::Member(selected_member_key) => {
+                        selected_member_key == member_key
+                    }
+                    _ => false,
+                };
+
+                let section_indices = match member {
+                    crate::SemanticMember::Field { section_indices, .. } => section_indices,
+                    crate::SemanticMember::Method { section_indices, .. } => section_indices,
+                };
+
+                let section_views =
+                    self.make_section_views_for_indices(commit_idx, file_idx, section_indices, is_read_only);
+
+                MemberView {
+                    debug: false, // Will be set from debug_info in container
+                    member_key,
+                    toggle_box: TristateBox {
+                        use_unicode: self.use_unicode,
+                        id: ComponentId::ToggleBox(SelectionKey::Member(member_key)),
+                        icon_style: TristateIconStyle::Check,
+                        tristate: member_toggled,
+                        is_focused,
+                        is_read_only,
+                    },
+                    expand_box: TristateBox {
+                        use_unicode: self.use_unicode,
+                        id: ComponentId::ExpandBox(SelectionKey::Member(member_key)),
+                        icon_style: TristateIconStyle::Expand,
+                        tristate: member_expanded,
+                        is_focused,
+                        is_read_only: false,
+                    },
+                    is_header_selected: is_focused,
+                    member,
+                    section_views,
+                }
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn make_section_views_for_indices(
+        &'state self,
+        commit_idx: usize,
+        file_idx: usize,
+        section_indices: &'state [usize],
+        is_read_only: bool,
+    ) -> Vec<SectionView<'state>> {
+        let file = match self.state.files.get(file_idx) {
+            Some(file) => file,
+            None => return Vec::new(),
+        };
+
+        let total_num_sections = section_indices.len();
+        let total_num_editable_sections = section_indices
+            .iter()
+            .filter_map(|&idx| file.sections.get(idx))
+            .filter(|section| section.is_editable())
+            .count();
+
+        let mut line_num = 1;
+        let mut editable_section_num = 0;
+
+        section_indices
+            .iter()
+            .filter_map(|&section_idx| {
+                let section = file.sections.get(section_idx)?;
+                let section_key = SectionKey {
+                    commit_idx,
+                    file_idx,
+                    section_idx,  // Now this is the correct file.sections index!
+                };
+                Some((section_idx, section, section_key))
+            })
+            .map(|(section_idx, section, section_key)| {
+                let section_toggled = self.section_tristate(section_key).unwrap_or(Tristate::False);
+                let section_expanded = Tristate::from(
+                    self.expanded_items
+                        .contains(&SelectionKey::Section(section_key)),
+                );
+                let is_focused = match self.selection_key {
+                    SelectionKey::Section(selection_section_key) => {
+                        selection_section_key == section_key
+                    }
+                    _ => false,
+                };
+
+                if section.is_editable() {
+                    editable_section_num += 1;
+                }
+
+                let section_view = SectionView {
+                    use_unicode: self.use_unicode,
+                    is_read_only,
+                    section_key,
+                    toggle_box: TristateBox {
+                        use_unicode: self.use_unicode,
+                        is_read_only,
+                        id: ComponentId::ToggleBox(SelectionKey::Section(section_key)),
+                        tristate: section_toggled,
+                        icon_style: TristateIconStyle::Check,
+                        is_focused,
+                    },
+                    expand_box: TristateBox {
+                        use_unicode: self.use_unicode,
+                        is_read_only: false,
+                        id: ComponentId::ExpandBox(SelectionKey::Section(section_key)),
+                        tristate: section_expanded,
+                        icon_style: TristateIconStyle::Expand,
+                        is_focused,
+                    },
+                    selection: match self.selection_key {
+                        SelectionKey::None
+                        | SelectionKey::File(_)
+                        | SelectionKey::Container(_)
+                        | SelectionKey::Member(_) => None,
+                        SelectionKey::Section(selected_section_key) => {
+                            if selected_section_key == section_key {
+                                Some(SectionSelection::SectionHeader)
+                            } else {
+                                None
+                            }
+                        }
+                        SelectionKey::Line(LineKey {
+                            commit_idx: line_commit_idx,
+                            file_idx: line_file_idx,
+                            section_idx: line_section_idx,
+                            line_idx,
+                        }) => {
+                            let selected_section_key = SectionKey {
+                                commit_idx: line_commit_idx,
+                                file_idx: line_file_idx,
+                                section_idx: line_section_idx,
+                            };
+                            if selected_section_key == section_key {
+                                Some(SectionSelection::ChangedLine(line_idx))
+                            } else {
+                                None
+                            }
+                        }
+                    },
+                    total_num_sections,
+                    editable_section_num,
+                    total_num_editable_sections,
+                    section,
+                    line_start_num: line_num,
+                };
+
+                line_num += match section {
+                    Section::Unchanged { lines } => lines.len(),
+                    Section::Changed { lines } => lines
+                        .iter()
+                        .filter(|changed_line| match changed_line.change_type {
+                            ChangeType::Added => false,
+                            ChangeType::Removed => true,
+                        })
+                        .count(),
+                    Section::FileMode { .. } | Section::Binary { .. } => 0,
+                };
+
+                section_view
             })
             .collect()
     }
@@ -1361,10 +1644,12 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     self.add_member_sections(&mut result, commit_idx, file_idx, member);
                                 }
                             }
-                            crate::SemanticContainer::Function { sections, .. } => {
+                            crate::SemanticContainer::Function { section_indices, .. } => {
                                 // Functions have sections directly (no members)
-                                for (section_idx, section) in sections.iter().enumerate() {
-                                    self.add_section_to_keys(&mut result, commit_idx, file_idx, section_idx, section);
+                                for &section_idx in section_indices {
+                                    if let Some(section) = file.sections.get(section_idx) {
+                                        self.add_section_to_keys(&mut result, commit_idx, file_idx, section_idx, section);
+                                    }
                                 }
                             }
                         }
@@ -1389,12 +1674,18 @@ impl<'state, 'input> Recorder<'state, 'input> {
         file_idx: usize,
         member: &crate::SemanticMember,
     ) {
-        let sections = match member {
-            crate::SemanticMember::Field { sections, .. } => sections,
-            crate::SemanticMember::Method { sections, .. } => sections,
+        let section_indices = match member {
+            crate::SemanticMember::Field { section_indices, .. } => section_indices,
+            crate::SemanticMember::Method { section_indices, .. } => section_indices,
         };
-        for (section_idx, section) in sections.iter().enumerate() {
-            self.add_section_to_keys(result, commit_idx, file_idx, section_idx, section);
+
+        // Look up sections from file.sections using the indices
+        if let Some(file) = self.state.files.get(file_idx) {
+            for &section_idx in section_indices {
+                if let Some(section) = file.sections.get(section_idx) {
+                    self.add_section_to_keys(result, commit_idx, file_idx, section_idx, section);
+                }
+            }
         }
     }
 
@@ -1995,9 +2286,16 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         Tristate::False => true,
                         Tristate::Partial | Tristate::True => false,
                     };
-                    self.visit_container(container_key, |container| {
-                        container.set_checked(is_checked_new);
-                    })?;
+                    // Need to access both container and file.sections
+                    let file_idx = container_key.file_idx;
+                    let container_idx = container_key.container_idx;
+                    if let Some(file) = self.state.files.get_mut(file_idx) {
+                        if let Some(containers) = &mut file.containers {
+                            if let Some(container) = containers.get_mut(container_idx) {
+                                container.set_checked(&mut file.sections, is_checked_new);
+                            }
+                        }
+                    }
                 }
                 #[cfg(not(feature = "tree-sitter"))]
                 {
@@ -2014,9 +2312,31 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         Tristate::False => true,
                         Tristate::Partial | Tristate::True => false,
                     };
-                    self.visit_member(member_key, |member| {
-                        member.set_checked(is_checked_new);
-                    })?;
+                    // Need to access both member and file.sections
+                    let file_idx = member_key.file_idx;
+                    let container_idx = member_key.container_idx;
+                    let member_idx = member_key.member_idx;
+                    if let Some(file) = self.state.files.get_mut(file_idx) {
+                        if let Some(containers) = &mut file.containers {
+                            if let Some(container) = containers.get_mut(container_idx) {
+                                match container {
+                                    crate::SemanticContainer::Struct { fields, .. } => {
+                                        if let Some(member) = fields.get_mut(member_idx) {
+                                            member.set_checked(&mut file.sections, is_checked_new);
+                                        }
+                                    }
+                                    crate::SemanticContainer::Impl { methods, .. } => {
+                                        if let Some(member) = methods.get_mut(member_idx) {
+                                            member.set_checked(&mut file.sections, is_checked_new);
+                                        }
+                                    }
+                                    crate::SemanticContainer::Function { .. } => {
+                                        // Functions don't have members, nothing to do
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 #[cfg(not(feature = "tree-sitter"))]
                 {
@@ -2537,7 +2857,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
     fn container(
         &self,
         container_key: ContainerKey,
-    ) -> Result<&crate::SemanticContainer<'_>, RecordError> {
+    ) -> Result<&crate::SemanticContainer, RecordError> {
         let ContainerKey {
             commit_idx,
             file_idx,
@@ -2616,7 +2936,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
     }
 
     #[cfg(feature = "tree-sitter")]
-    fn member(&self, member_key: MemberKey) -> Result<&crate::SemanticMember<'_>, RecordError> {
+    fn member(&self, member_key: MemberKey) -> Result<&crate::SemanticMember, RecordError> {
         let MemberKey {
             commit_idx,
             file_idx,
@@ -3197,6 +3517,8 @@ struct FileView<'a> {
     is_header_selected: bool,
     old_path: Option<&'a Path>,
     path: &'a Path,
+    #[cfg(feature = "tree-sitter")]
+    container_views: Option<Vec<ContainerView<'a>>>,
     section_views: Vec<SectionView<'a>>,
 }
 
@@ -3224,6 +3546,8 @@ impl Component for FileView<'_> {
             expand_box,
             old_path,
             path,
+            #[cfg(feature = "tree-sitter")]
+            container_views,
             section_views,
             is_header_selected,
         } = self;
@@ -3242,7 +3566,23 @@ impl Component for FileView<'_> {
         );
         if self.is_expanded() {
             let x = x + 2;
-            let mut section_y = y + file_view_header_rect.height.unwrap_isize();
+            let mut child_y = y + file_view_header_rect.height.unwrap_isize();
+
+            // Render semantic containers if available (tree-sitter feature)
+            #[cfg(feature = "tree-sitter")]
+            if let Some(container_views) = container_views {
+                for container_view in container_views {
+                    let container_rect = viewport.draw_component(x, child_y, container_view);
+                    child_y += container_rect.height.unwrap_isize();
+
+                    if *debug {
+                        viewport.debug(format!("container dims: {container_rect:?}"));
+                    }
+                }
+                return;
+            }
+
+            // Traditional section rendering (fallback when tree-sitter not available or no containers)
             let expanded_sections: HashSet<usize> = section_views
                 .iter()
                 .enumerate()
@@ -3263,8 +3603,8 @@ impl Component for FileView<'_> {
                     continue;
                 }
 
-                let section_rect = viewport.draw_component(x, section_y, section_view);
-                section_y += section_rect.height.unwrap_isize();
+                let section_rect = viewport.draw_component(x, child_y, section_view);
+                child_y += section_rect.height.unwrap_isize();
 
                 if *debug {
                     viewport.debug(format!("section dims: {section_rect:?}",));
@@ -3282,7 +3622,7 @@ struct ContainerView<'a> {
     toggle_box: TristateBox<ComponentId>,
     expand_box: TristateBox<ComponentId>,
     is_header_selected: bool,
-    container: &'a crate::SemanticContainer<'a>,
+    container: &'a crate::SemanticContainer,
     member_views: Vec<MemberView<'a>>,
     section_views: Vec<SectionView<'a>>,  // For functions without members
 }
@@ -3295,8 +3635,219 @@ struct MemberView<'a> {
     toggle_box: TristateBox<ComponentId>,
     expand_box: TristateBox<ComponentId>,
     is_header_selected: bool,
-    member: &'a crate::SemanticMember<'a>,
+    member: &'a crate::SemanticMember,
     section_views: Vec<SectionView<'a>>,
+}
+
+#[cfg(feature = "tree-sitter")]
+impl ContainerView<'_> {
+    fn is_expanded(&self) -> bool {
+        match self.expand_box.tristate {
+            Tristate::False => false,
+            Tristate::Partial | Tristate::True => true,
+        }
+    }
+
+    fn icon_and_name(&self) -> (char, String) {
+        match self.container {
+            crate::SemanticContainer::Struct { name, .. } => ('📦', format!("struct {}", name)),
+            crate::SemanticContainer::Impl {
+                type_name,
+                trait_name,
+                ..
+            } => {
+                let name = match trait_name {
+                    Some(trait_name) => format!("impl {} for {}", trait_name, type_name),
+                    None => format!("impl {}", type_name),
+                };
+                ('🔧', name)
+            }
+            crate::SemanticContainer::Function { name, .. } => ('⚡', format!("fn {}", name)),
+        }
+    }
+}
+
+#[cfg(feature = "tree-sitter")]
+impl Component for ContainerView<'_> {
+    type Id = ComponentId;
+
+    fn id(&self) -> Self::Id {
+        ComponentId::SelectableItem(SelectionKey::Container(self.container_key))
+    }
+
+    fn draw(&self, viewport: &mut Viewport<Self::Id>, x: isize, y: isize) {
+        let Self {
+            debug,
+            container_key: _,
+            toggle_box,
+            expand_box,
+            is_header_selected,
+            container: _,
+            member_views,
+            section_views,
+        } = self;
+
+        // Draw the container header
+        viewport.draw_blank(Rect {
+            x,
+            y,
+            width: viewport.mask_rect().width,
+            height: 1,
+        });
+
+        let expand_box_width = expand_box.text().width().unwrap_isize();
+        let expand_box_rect = viewport.draw_component(
+            viewport.mask_rect().end_x() - expand_box_width,
+            y,
+            expand_box,
+        );
+
+        viewport.with_mask(
+            Mask {
+                x,
+                y,
+                width: Some((expand_box_rect.x - x).clamp_into_usize()),
+                height: Some(1),
+            },
+            |viewport| {
+                let toggle_box_rect = viewport.draw_component(x, y, toggle_box);
+                let (icon, name) = self.icon_and_name();
+                viewport.draw_text(
+                    x + toggle_box_rect.width.unwrap_isize() + 1,
+                    y,
+                    Span::styled(
+                        format!("{} {}", icon, name),
+                        if *is_header_selected {
+                            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        },
+                    ),
+                );
+            },
+        );
+
+        // Draw members or sections if expanded
+        if self.is_expanded() {
+            let child_x = x + 2;
+            let mut child_y = y + 1;
+
+            if !member_views.is_empty() {
+                // Render members (for struct/impl)
+                for member_view in member_views {
+                    let member_rect = viewport.draw_component(child_x, child_y, member_view);
+                    child_y += member_rect.height.unwrap_isize();
+
+                    if *debug {
+                        viewport.debug(format!("member dims: {member_rect:?}"));
+                    }
+                }
+            } else {
+                // Render sections directly (for functions)
+                for section_view in section_views {
+                    let section_rect = viewport.draw_component(child_x, child_y, section_view);
+                    child_y += section_rect.height.unwrap_isize();
+
+                    if *debug {
+                        viewport.debug(format!("section dims: {section_rect:?}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tree-sitter")]
+impl MemberView<'_> {
+    fn is_expanded(&self) -> bool {
+        match self.expand_box.tristate {
+            Tristate::False => false,
+            Tristate::Partial | Tristate::True => true,
+        }
+    }
+
+    fn icon_and_name(&self) -> (char, String) {
+        match self.member {
+            crate::SemanticMember::Field { name, .. } => ('•', format!("field {}", name)),
+            crate::SemanticMember::Method { name, .. } => ('→', format!("fn {}", name)),
+        }
+    }
+}
+
+#[cfg(feature = "tree-sitter")]
+impl Component for MemberView<'_> {
+    type Id = ComponentId;
+
+    fn id(&self) -> Self::Id {
+        ComponentId::SelectableItem(SelectionKey::Member(self.member_key))
+    }
+
+    fn draw(&self, viewport: &mut Viewport<Self::Id>, x: isize, y: isize) {
+        let Self {
+            debug,
+            member_key: _,
+            toggle_box,
+            expand_box,
+            is_header_selected,
+            member: _,
+            section_views,
+        } = self;
+
+        // Draw the member header
+        viewport.draw_blank(Rect {
+            x,
+            y,
+            width: viewport.mask_rect().width,
+            height: 1,
+        });
+
+        let expand_box_width = expand_box.text().width().unwrap_isize();
+        let expand_box_rect = viewport.draw_component(
+            viewport.mask_rect().end_x() - expand_box_width,
+            y,
+            expand_box,
+        );
+
+        viewport.with_mask(
+            Mask {
+                x,
+                y,
+                width: Some((expand_box_rect.x - x).clamp_into_usize()),
+                height: Some(1),
+            },
+            |viewport| {
+                let toggle_box_rect = viewport.draw_component(x, y, toggle_box);
+                let (icon, name) = self.icon_and_name();
+                viewport.draw_text(
+                    x + toggle_box_rect.width.unwrap_isize() + 1,
+                    y,
+                    Span::styled(
+                        format!("{} {}", icon, name),
+                        if *is_header_selected {
+                            Style::default().fg(Color::Blue)
+                        } else {
+                            Style::default()
+                        },
+                    ),
+                );
+            },
+        );
+
+        // Draw sections if expanded
+        if self.is_expanded() {
+            let child_x = x + 2;
+            let mut child_y = y + 1;
+
+            for section_view in section_views {
+                let section_rect = viewport.draw_component(child_x, child_y, section_view);
+                child_y += section_rect.height.unwrap_isize();
+
+                if *debug {
+                    viewport.debug(format!("section dims: {section_rect:?}"));
+                }
+            }
+        }
+    }
 }
 
 struct FileViewHeader<'a> {

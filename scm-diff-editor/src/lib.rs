@@ -747,7 +747,7 @@ qux2
                 verbose: false,
             },
         )?;
-        assert_debug_snapshot!(files, @r###"
+        assert_debug_snapshot!(files, @r#"
         [
             File {
                 old_path: Some(
@@ -793,9 +793,10 @@ qux2
                         ],
                     },
                 ],
+                containers: None,
             },
         ]
-        "###);
+        "#);
 
         select_all(&mut files);
         apply_changes(
@@ -933,7 +934,7 @@ qux2
                 verbose: false,
             },
         )?;
-        assert_debug_snapshot!(files, @r###"
+        assert_debug_snapshot!(files, @r#"
         [
             File {
                 old_path: Some(
@@ -958,9 +959,10 @@ qux2
                         ],
                     },
                 ],
+                containers: None,
             },
         ]
-        "###);
+        "#);
 
         select_all(&mut files);
         apply_changes(
@@ -1016,7 +1018,7 @@ qux2
                 verbose: false,
             },
         )?;
-        assert_debug_snapshot!(files, @r###"
+        assert_debug_snapshot!(files, @r#"
         [
             File {
                 old_path: Some(
@@ -1041,9 +1043,10 @@ qux2
                         ],
                     },
                 ],
+                containers: None,
             },
         ]
-        "###);
+        "#);
 
         select_all(&mut files);
         apply_changes(
@@ -1129,6 +1132,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
 
@@ -1193,6 +1197,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
 
@@ -1282,7 +1287,7 @@ Hello world 4
                 verbose: false,
             },
         )?;
-        insta::assert_debug_snapshot!(files, @r###"
+        insta::assert_debug_snapshot!(files, @r#"
         [
             File {
                 old_path: Some(
@@ -1324,9 +1329,10 @@ Hello world 4
                         ],
                     },
                 ],
+                containers: None,
             },
         ]
-        "###);
+        "#);
 
         select_all(&mut files);
         apply_changes(
@@ -1418,7 +1424,7 @@ Hello world 2
                 verbose: false,
             },
         )?;
-        insta::assert_debug_snapshot!(files, @r###"
+        insta::assert_debug_snapshot!(files, @r#"
         [
             File {
                 old_path: Some(
@@ -1448,9 +1454,10 @@ Hello world 2
                         ],
                     },
                 ],
+                containers: None,
             },
         ]
-        "###);
+        "#);
 
         // Select no changes from new file.
         apply_changes(
