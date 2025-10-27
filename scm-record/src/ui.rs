@@ -1263,7 +1263,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
                 };
                 Some((section_idx, section, section_key))
             })
-            .map(|(section_idx, section, section_key)| {
+            .map(|(_section_idx, section, section_key)| {
                 let section_toggled = self.section_tristate(section_key).unwrap_or(Tristate::False);
                 let section_expanded = Tristate::from(
                     self.expanded_items
@@ -3021,38 +3021,6 @@ impl<'state, 'input> Recorder<'state, 'input> {
     }
 
     #[cfg(feature = "tree-sitter")]
-    fn visit_container<T>(
-        &mut self,
-        container_key: ContainerKey,
-        f: impl Fn(&mut crate::SemanticContainer) -> T,
-    ) -> Result<T, RecordError> {
-        let ContainerKey {
-            commit_idx: _,
-            file_idx,
-            container_idx,
-        } = container_key;
-        let file = match self.state.files.get_mut(file_idx) {
-            Some(file) => file,
-            None => {
-                return Err(RecordError::Bug(format!(
-                    "Out-of-bounds file for container key: {container_key:?}"
-                )));
-            }
-        };
-        match &mut file.containers {
-            Some(containers) => match containers.get_mut(container_idx) {
-                Some(container) => Ok(f(container)),
-                None => Err(RecordError::Bug(format!(
-                    "Out-of-bounds container key: {container_key:?}"
-                ))),
-            },
-            None => Err(RecordError::Bug(format!(
-                "No containers found for file at container key: {container_key:?}"
-            ))),
-        }
-    }
-
-    #[cfg(feature = "tree-sitter")]
     fn container_tristate(
         &self,
         container_key: ContainerKey,
@@ -3099,59 +3067,6 @@ impl<'state, 'input> Recorder<'state, 'input> {
         };
         match members.get(member_idx) {
             Some(member) => Ok(member),
-            None => Err(RecordError::Bug(format!(
-                "Out-of-bounds member key: {member_key:?}"
-            ))),
-        }
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    fn visit_member<T>(
-        &mut self,
-        member_key: MemberKey,
-        f: impl Fn(&mut crate::SemanticMember) -> T,
-    ) -> Result<T, RecordError> {
-        let MemberKey {
-            commit_idx: _,
-            file_idx,
-            container_idx,
-            member_idx,
-        } = member_key;
-        let file = match self.state.files.get_mut(file_idx) {
-            Some(file) => file,
-            None => {
-                return Err(RecordError::Bug(format!(
-                    "Out-of-bounds file for member key: {member_key:?}"
-                )));
-            }
-        };
-        let containers = match &mut file.containers {
-            Some(containers) => containers,
-            None => {
-                return Err(RecordError::Bug(format!(
-                    "No containers found for file at member key: {member_key:?}"
-                )));
-            }
-        };
-        let container = match containers.get_mut(container_idx) {
-            Some(container) => container,
-            None => {
-                return Err(RecordError::Bug(format!(
-                    "Out-of-bounds container for member key: {member_key:?}"
-                )));
-            }
-        };
-        let members = match container {
-            crate::SemanticContainer::Struct { fields, .. } => fields,
-            crate::SemanticContainer::Impl { methods, .. } => methods,
-            crate::SemanticContainer::Function { .. } => {
-                return Err(RecordError::Bug(format!(
-                    "Functions don't have members: {member_key:?}"
-                )));
-            }
-        };
-        match members.get_mut(member_idx) {
-            Some(member) => Ok(f(member)),
             None => Err(RecordError::Bug(format!(
                 "Out-of-bounds member key: {member_key:?}"
             ))),
