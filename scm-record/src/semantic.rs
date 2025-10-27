@@ -126,12 +126,12 @@ pub fn parse_file_versions(
     ))
 }
 
-/// Information about a Rust container (struct, impl, function) extracted from the AST.
+/// Information about a semantic container (struct, class, impl, function, etc.) extracted from the AST.
 #[cfg(feature = "tree-sitter")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RustContainer {
+pub struct Container {
     /// The type of container
-    pub kind: RustContainerKind,
+    pub kind: ContainerKind,
     /// The name of the container
     pub name: String,
     /// Start line number (0-indexed)
@@ -140,24 +140,53 @@ pub struct RustContainer {
     pub end_line: usize,
 }
 
-/// The kind of Rust container.
+/// The kind of semantic container, generalized across languages.
 #[cfg(feature = "tree-sitter")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RustContainerKind {
-    /// A struct definition
+pub enum ContainerKind {
+    /// A struct definition (Rust)
     Struct,
-    /// An impl block
+    /// A class definition (Kotlin, Java, Python)
+    Class,
+    /// An interface definition (Kotlin, Java)
+    Interface,
+    /// An enum definition (Kotlin, Java)
+    Enum,
+    /// An object declaration (Kotlin)
+    Object,
+    /// An impl block (Rust)
     Impl {
         /// The trait being implemented, if any
         trait_name: Option<String>,
     },
     /// A top-level function
     Function,
+    /// An HCL resource block
+    Resource {
+        /// Resource type (e.g., "aws_instance")
+        resource_type: String,
+    },
+    /// An HCL data source block
+    DataSource {
+        /// Data source type (e.g., "aws_ami")
+        data_type: String,
+    },
+    /// An HCL variable declaration
+    Variable,
+    /// An HCL output declaration
+    Output,
+    /// An HCL module block
+    Module,
+    /// A Markdown section (header)
+    Section {
+        /// Header level (1-6)
+        level: usize,
+    },
 }
 
 /// Extract Rust containers from a parsed syntax tree.
 #[cfg(feature = "tree-sitter")]
-pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<RustContainer> {
+pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<Container> {
     let mut containers = Vec::new();
     let root_node = parsed.tree.root_node();
     let source_bytes = parsed.source.as_bytes();
@@ -173,8 +202,8 @@ pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<RustContainer> {
                         .unwrap_or("<unknown>")
                         .to_string();
 
-                    containers.push(RustContainer {
-                        kind: RustContainerKind::Struct,
+                    containers.push(Container {
+                        kind: ContainerKind::Struct,
                         name,
                         start_line: child.start_position().row,
                         end_line: child.end_position().row,
@@ -196,8 +225,8 @@ pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<RustContainer> {
                         node.utf8_text(source_bytes).ok().map(|s| s.to_string())
                     });
 
-                    containers.push(RustContainer {
-                        kind: RustContainerKind::Impl { trait_name },
+                    containers.push(Container {
+                        kind: ContainerKind::Impl { trait_name },
                         name: type_name,
                         start_line: child.start_position().row,
                         end_line: child.end_position().row,
@@ -211,8 +240,8 @@ pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<RustContainer> {
                         .unwrap_or("<unknown>")
                         .to_string();
 
-                    containers.push(RustContainer {
-                        kind: RustContainerKind::Function,
+                    containers.push(Container {
+                        kind: ContainerKind::Function,
                         name,
                         start_line: child.start_position().row,
                         end_line: child.end_position().row,
@@ -226,12 +255,12 @@ pub fn extract_rust_containers(parsed: &ParsedFile) -> Vec<RustContainer> {
     containers
 }
 
-/// Information about a Rust member (field or method) extracted from the AST.
+/// Information about a semantic member (field, method, property) extracted from the AST.
 #[cfg(feature = "tree-sitter")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RustMember {
+pub struct Member {
     /// The type of member
-    pub kind: RustMemberKind,
+    pub kind: MemberKind,
     /// The name of the member
     pub name: String,
     /// Start line number (0-indexed)
@@ -240,14 +269,16 @@ pub struct RustMember {
     pub end_line: usize,
 }
 
-/// The kind of Rust member.
+/// The kind of semantic member, generalized across languages.
 #[cfg(feature = "tree-sitter")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RustMemberKind {
-    /// A struct field
+pub enum MemberKind {
+    /// A field (Rust, Kotlin, Java, Python)
     Field,
-    /// A method in an impl block
+    /// A method (all languages)
     Method,
+    /// A property (Kotlin, Python)
+    Property,
 }
 
 /// Extract struct fields from a struct definition node.
@@ -255,7 +286,7 @@ pub enum RustMemberKind {
 pub fn extract_struct_fields(
     struct_node: tree_sitter::Node,
     source_bytes: &[u8],
-) -> Vec<RustMember> {
+) -> Vec<Member> {
     let mut fields = Vec::new();
 
     // Find the field_declaration_list
@@ -271,8 +302,8 @@ pub fn extract_struct_fields(
 
                     let (start_line, end_line) = expand_range_for_attributes_and_comments(field, field_list);
 
-                    fields.push(RustMember {
-                        kind: RustMemberKind::Field,
+                    fields.push(Member {
+                        kind: MemberKind::Field,
                         name,
                         start_line,
                         end_line,
@@ -290,7 +321,7 @@ pub fn extract_struct_fields(
 pub fn extract_impl_methods(
     impl_node: tree_sitter::Node,
     source_bytes: &[u8],
-) -> Vec<RustMember> {
+) -> Vec<Member> {
     let mut methods = Vec::new();
 
     // Find the declaration_list
@@ -306,8 +337,8 @@ pub fn extract_impl_methods(
 
                     let (start_line, end_line) = expand_range_for_attributes_and_comments(item, decl_list);
 
-                    methods.push(RustMember {
-                        kind: RustMemberKind::Method,
+                    methods.push(Member {
+                        kind: MemberKind::Method,
                         name,
                         start_line,
                         end_line,
@@ -320,43 +351,108 @@ pub fn extract_impl_methods(
     methods
 }
 
-/// Expands a node's line range to include preceding attributes, comments, and whitespace.
+/// Configuration for what trivia types to include when expanding node ranges.
+#[cfg(feature = "tree-sitter")]
+#[derive(Debug, Clone)]
+struct TriviaConfig {
+    /// Node kinds that should always be included (e.g., attributes, annotations, decorators)
+    always_include: &'static [&'static str],
+    /// Node kinds that should be included if adjacent (e.g., comments)
+    adjacent_only: &'static [&'static str],
+}
+
+#[cfg(feature = "tree-sitter")]
+impl TriviaConfig {
+    /// Rust trivia configuration
+    fn rust() -> Self {
+        Self {
+            always_include: &["attribute_item"], // #[test], #[cfg(...)]
+            adjacent_only: &["line_comment", "block_comment"], // ///, /* */
+        }
+    }
+
+    /// Kotlin trivia configuration
+    fn kotlin() -> Self {
+        Self {
+            always_include: &["annotation"], // @Test, @JvmStatic
+            adjacent_only: &["comment"], // //, /* */
+        }
+    }
+
+    /// Java trivia configuration
+    fn java() -> Self {
+        Self {
+            always_include: &["marker_annotation", "annotation"], // @Override, @Test
+            adjacent_only: &["line_comment", "block_comment", "javadoc_comment"], // //, /* */, /** */
+        }
+    }
+
+    /// Python trivia configuration
+    fn python() -> Self {
+        Self {
+            always_include: &["decorator"], // @property, @staticmethod
+            adjacent_only: &["comment"], // #
+        }
+    }
+
+    /// HCL trivia configuration
+    fn hcl() -> Self {
+        Self {
+            always_include: &[], // HCL doesn't have attributes/annotations
+            adjacent_only: &["comment"], // #, //
+        }
+    }
+
+    /// Generic fallback for languages without special trivia
+    fn generic() -> Self {
+        Self {
+            always_include: &[],
+            adjacent_only: &["comment"],
+        }
+    }
+}
+
+/// Expands a node's line range to include preceding trivia (attributes, comments, etc.).
 ///
 /// This ensures that when we group sections by semantic structure, we include the full
-/// declaration including doc comments, attributes, and surrounding whitespace.
+/// declaration including doc comments, attributes/annotations/decorators, and surrounding whitespace.
+///
+/// The `config` parameter determines which node types are considered trivia for the language.
 #[cfg(feature = "tree-sitter")]
-fn expand_range_for_attributes_and_comments(
+fn expand_range_for_trivia(
     node: tree_sitter::Node,
     parent: tree_sitter::Node,
+    config: &TriviaConfig,
 ) -> (usize, usize) {
     let mut start_line = node.start_position().row;
     let end_line = node.end_position().row;
 
-    // Walk backwards through siblings to find attributes and comments
+    // Walk backwards through siblings to find trivia
     let mut cursor = parent.walk();
     let siblings: Vec<_> = parent.children(&mut cursor).collect();
 
     if let Some(node_index) = siblings.iter().position(|n| n.id() == node.id()) {
         // Look at all previous siblings in reverse order
         for sibling in siblings[..node_index].iter().rev() {
-            match sibling.kind() {
-                // Include attribute items like #[test], #[cfg(...)]
-                "attribute_item" => {
-                    start_line = start_line.min(sibling.start_position().row);
+            let kind = sibling.kind();
+
+            // Check if this is a trivia node that should always be included
+            if config.always_include.contains(&kind) {
+                start_line = start_line.min(sibling.start_position().row);
+            }
+            // Check if this is a trivia node that should only be included if adjacent
+            else if config.adjacent_only.contains(&kind) {
+                let sibling_line = sibling.start_position().row;
+                // Only include if it's adjacent or within 1 line
+                if start_line.saturating_sub(sibling_line) <= 1 {
+                    start_line = sibling_line;
+                } else {
+                    break; // Stop if there's a gap
                 }
-                // Include doc comments ///
-                "line_comment" => {
-                    let sibling_line = sibling.start_position().row;
-                    // Only include if it's adjacent or within 1 line
-                    if start_line.saturating_sub(sibling_line) <= 1 {
-                        start_line = sibling_line;
-                    } else {
-                        break; // Stop if there's a gap
-                    }
-                }
-                // Stop at non-comment/non-attribute siblings
-                _ if !sibling.kind().is_empty() => break,
-                _ => {}
+            }
+            // Stop at non-trivia siblings
+            else if !kind.is_empty() {
+                break;
             }
         }
     }
@@ -364,12 +460,503 @@ fn expand_range_for_attributes_and_comments(
     (start_line, end_line)
 }
 
+/// Expands a node's line range to include preceding attributes and comments (Rust-specific wrapper).
+///
+/// This is a convenience wrapper around `expand_range_for_trivia` for Rust code.
+#[cfg(feature = "tree-sitter")]
+fn expand_range_for_attributes_and_comments(
+    node: tree_sitter::Node,
+    parent: tree_sitter::Node,
+) -> (usize, usize) {
+    expand_range_for_trivia(node, parent, &TriviaConfig::rust())
+}
+
+/// Extract methods from a Python class definition node.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_python_methods(
+    class_node: tree_sitter::Node,
+    source_bytes: &[u8],
+) -> Vec<Member> {
+    let mut methods = Vec::new();
+
+    // Find the class body (block node)
+    if let Some(body) = class_node.child_by_field_name("body") {
+        let mut cursor = body.walk();
+        for item in body.children(&mut cursor) {
+            // Python has function_definition nodes for methods
+            // Can also have decorated_definition wrapping a function_definition
+            let function_node = match item.kind() {
+                "function_definition" => Some(item),
+                "decorated_definition" => {
+                    // Look for function_definition child
+                    item.child_by_field_name("definition")
+                        .filter(|n| n.kind() == "function_definition")
+                }
+                _ => None,
+            };
+
+            if let Some(func_node) = function_node {
+                if let Some(name_node) = func_node.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    // Use the outer node (decorated_definition if present, otherwise function_definition)
+                    // for proper range calculation
+                    let range_node = if item.kind() == "decorated_definition" {
+                        item
+                    } else {
+                        func_node
+                    };
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(range_node, body, &TriviaConfig::python());
+
+                    methods.push(Member {
+                        kind: MemberKind::Method,
+                        name,
+                        start_line,
+                        end_line,
+                    });
+                }
+            }
+        }
+    }
+
+    methods
+}
+
+/// Extract containers with their members from a parsed Python file.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_python_containers_with_members(parsed: &ParsedFile) -> Vec<ContainerWithMembers> {
+    let mut containers = Vec::new();
+    let root_node = parsed.tree.root_node();
+    let source_bytes = parsed.source.as_bytes();
+
+    let mut cursor = root_node.walk();
+    for child in root_node.children(&mut cursor) {
+        // Check for class_definition or decorated_definition wrapping a class
+        let (class_node, outer_node) = match child.kind() {
+            "class_definition" => (Some(child), child),
+            "decorated_definition" => {
+                let def = child.child_by_field_name("definition");
+                if let Some(class_def) = def.filter(|n| n.kind() == "class_definition") {
+                    (Some(class_def), child)
+                } else {
+                    (None, child)
+                }
+            }
+            _ => (None, child),
+        };
+
+        if let Some(class_def) = class_node {
+            if let Some(name_node) = class_def.child_by_field_name("name") {
+                let name = name_node
+                    .utf8_text(source_bytes)
+                    .unwrap_or("<unknown>")
+                    .to_string();
+
+                let methods = extract_python_methods(class_def, source_bytes);
+                let (start_line, end_line) =
+                    expand_range_for_trivia(outer_node, root_node, &TriviaConfig::python());
+
+                containers.push(ContainerWithMembers {
+                    container: Container {
+                        kind: ContainerKind::Class,
+                        name,
+                        start_line,
+                        end_line,
+                    },
+                    members: methods,
+                });
+            }
+        }
+        // Check for top-level function_definition
+        else if child.kind() == "function_definition"
+            || (child.kind() == "decorated_definition"
+                && child
+                    .child_by_field_name("definition")
+                    .map(|n| n.kind() == "function_definition")
+                    .unwrap_or(false))
+        {
+            let func_node = if child.kind() == "function_definition" {
+                child
+            } else {
+                child
+                    .child_by_field_name("definition")
+                    .expect("decorated_definition must have definition")
+            };
+
+            if let Some(name_node) = func_node.child_by_field_name("name") {
+                let name = name_node
+                    .utf8_text(source_bytes)
+                    .unwrap_or("<unknown>")
+                    .to_string();
+
+                let (start_line, end_line) =
+                    expand_range_for_trivia(child, root_node, &TriviaConfig::python());
+
+                containers.push(ContainerWithMembers {
+                    container: Container {
+                        kind: ContainerKind::Function,
+                        name,
+                        start_line,
+                        end_line,
+                    },
+                    members: Vec::new(), // Functions don't have members
+                });
+            }
+        }
+    }
+
+    containers
+}
+
+/// Extract members (properties and methods) from a Kotlin class/object/interface.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_kotlin_members(
+    body_node: tree_sitter::Node,
+    source_bytes: &[u8],
+) -> Vec<Member> {
+    let mut members = Vec::new();
+    let mut cursor = body_node.walk();
+
+    for item in body_node.children(&mut cursor) {
+        match item.kind() {
+            "property_declaration" => {
+                if let Some(name_node) = item.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(item, body_node, &TriviaConfig::kotlin());
+
+                    members.push(Member {
+                        kind: MemberKind::Property,
+                        name,
+                        start_line,
+                        end_line,
+                    });
+                }
+            }
+            "function_declaration" => {
+                if let Some(name_node) = item.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(item, body_node, &TriviaConfig::kotlin());
+
+                    members.push(Member {
+                        kind: MemberKind::Method,
+                        name,
+                        start_line,
+                        end_line,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    members
+}
+
+/// Extract containers with their members from a parsed Kotlin file.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_kotlin_containers_with_members(parsed: &ParsedFile) -> Vec<ContainerWithMembers> {
+    let mut containers = Vec::new();
+    let root_node = parsed.tree.root_node();
+    let source_bytes = parsed.source.as_bytes();
+
+    let mut cursor = root_node.walk();
+    for child in root_node.children(&mut cursor) {
+        match child.kind() {
+            "class_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    // Find class_body by kind, not by field name
+                    let mut cursor2 = child.walk();
+                    let class_body = child.children(&mut cursor2)
+                        .find(|c| c.kind() == "class_body");
+                    let members = class_body
+                        .map(|body| extract_kotlin_members(body, source_bytes))
+                        .unwrap_or_default();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::kotlin());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Class,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            "object_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    // Find class_body by kind, not by field name
+                    let mut cursor2 = child.walk();
+                    let class_body = child.children(&mut cursor2)
+                        .find(|c| c.kind() == "class_body");
+                    let members = class_body
+                        .map(|body| extract_kotlin_members(body, source_bytes))
+                        .unwrap_or_default();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::kotlin());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Object,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            "interface_declaration" | "annotation_class" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    // Find class_body by kind, not by field name
+                    let mut cursor2 = child.walk();
+                    let class_body = child.children(&mut cursor2)
+                        .find(|c| c.kind() == "class_body");
+                    let members = class_body
+                        .map(|body| extract_kotlin_members(body, source_bytes))
+                        .unwrap_or_default();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::kotlin());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Interface,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            "function_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::kotlin());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Function,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members: Vec::new(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    containers
+}
+
+/// Extract members (fields and methods) from a Java class/interface/enum body.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_java_members(
+    body_node: tree_sitter::Node,
+    source_bytes: &[u8],
+) -> Vec<Member> {
+    let mut members = Vec::new();
+    let mut cursor = body_node.walk();
+
+    for item in body_node.children(&mut cursor) {
+        match item.kind() {
+            "field_declaration" => {
+                // Java fields can declare multiple variables, extract each
+                let mut field_cursor = item.walk();
+                for field_child in item.children(&mut field_cursor) {
+                    if field_child.kind() == "variable_declarator" {
+                        if let Some(name_node) = field_child.child_by_field_name("name") {
+                            let name = name_node
+                                .utf8_text(source_bytes)
+                                .unwrap_or("<unknown>")
+                                .to_string();
+
+                            let (start_line, end_line) =
+                                expand_range_for_trivia(item, body_node, &TriviaConfig::java());
+
+                            members.push(Member {
+                                kind: MemberKind::Field,
+                                name,
+                                start_line,
+                                end_line,
+                            });
+                            break; // Only take first variable declarator for the whole field declaration
+                        }
+                    }
+                }
+            }
+            "method_declaration" | "constructor_declaration" => {
+                if let Some(name_node) = item.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(item, body_node, &TriviaConfig::java());
+
+                    members.push(Member {
+                        kind: MemberKind::Method,
+                        name,
+                        start_line,
+                        end_line,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    members
+}
+
+/// Extract containers with their members from a parsed Java file.
+#[cfg(feature = "tree-sitter")]
+pub fn extract_java_containers_with_members(parsed: &ParsedFile) -> Vec<ContainerWithMembers> {
+    let mut containers = Vec::new();
+    let root_node = parsed.tree.root_node();
+    let source_bytes = parsed.source.as_bytes();
+
+    let mut cursor = root_node.walk();
+    for child in root_node.children(&mut cursor) {
+        match child.kind() {
+            "class_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let members = if let Some(body) = child.child_by_field_name("body") {
+                        extract_java_members(body, source_bytes)
+                    } else {
+                        Vec::new()
+                    };
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::java());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Class,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            "interface_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let members = if let Some(body) = child.child_by_field_name("body") {
+                        extract_java_members(body, source_bytes)
+                    } else {
+                        Vec::new()
+                    };
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::java());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Interface,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            "enum_declaration" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let members = if let Some(body) = child.child_by_field_name("body") {
+                        extract_java_members(body, source_bytes)
+                    } else {
+                        Vec::new()
+                    };
+
+                    let (start_line, end_line) =
+                        expand_range_for_trivia(child, root_node, &TriviaConfig::java());
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Enum,
+                            name,
+                            start_line,
+                            end_line,
+                        },
+                        members,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    containers
+}
+
 /// Extract containers with their members from a parsed Rust file.
 ///
 /// Returns a vector of containers (structs, impls, functions) with their associated
 /// members (fields, methods). Line ranges are expanded to include attributes and comments.
 #[cfg(feature = "tree-sitter")]
-pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustContainerWithMembers> {
+pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<ContainerWithMembers> {
     let mut containers = Vec::new();
     let root_node = parsed.tree.root_node();
     let source_bytes = parsed.source.as_bytes();
@@ -387,9 +974,9 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
                     let fields = extract_struct_fields(child, source_bytes);
                     let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
 
-                    containers.push(RustContainerWithMembers {
-                        container: RustContainer {
-                            kind: RustContainerKind::Struct,
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Struct,
                             name,
                             start_line,
                             end_line,
@@ -415,9 +1002,9 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
                     let methods = extract_impl_methods(child, source_bytes);
                     let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
 
-                    containers.push(RustContainerWithMembers {
-                        container: RustContainer {
-                            kind: RustContainerKind::Impl { trait_name },
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Impl { trait_name },
                             name: type_name,
                             start_line,
                             end_line,
@@ -435,9 +1022,9 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
 
                     let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
 
-                    containers.push(RustContainerWithMembers {
-                        container: RustContainer {
-                            kind: RustContainerKind::Function,
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Function,
                             name,
                             start_line,
                             end_line,
@@ -453,14 +1040,14 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
     containers
 }
 
-/// A Rust container with its extracted members.
+/// A semantic container with its extracted members.
 #[cfg(feature = "tree-sitter")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RustContainerWithMembers {
+pub struct ContainerWithMembers {
     /// The container information
-    pub container: RustContainer,
+    pub container: Container,
     /// The members within this container (fields for structs, methods for impls)
-    pub members: Vec<RustMember>,
+    pub members: Vec<Member>,
 }
 
 /// Errors that can occur during semantic parsing.
@@ -662,19 +1249,21 @@ pub fn try_add_semantic_containers<'a>(
         None => return file, // Unsupported language, return unchanged
     };
 
-    // Only Rust is implemented for now
-    if !matches!(language, SupportedLanguage::Rust) {
-        return file;
-    }
-
     // Parse both versions
     let (_old_parsed, new_parsed) = match parse_file_versions(language, old_source, new_source) {
         Ok(parsed) => parsed,
         Err(_) => return file, // Parse failed, fall back
     };
 
-    // Extract containers with members from the new version
-    let containers_with_members = extract_rust_containers_with_members(&new_parsed);
+    // Extract containers with members from the new version (language-specific)
+    let containers_with_members = match language {
+        SupportedLanguage::Rust => extract_rust_containers_with_members(&new_parsed),
+        SupportedLanguage::Python => extract_python_containers_with_members(&new_parsed),
+        SupportedLanguage::Kotlin => extract_kotlin_containers_with_members(&new_parsed),
+        SupportedLanguage::Java => extract_java_containers_with_members(&new_parsed),
+        // Other languages not yet implemented (HCL, Markdown, YAML)
+        _ => return file,
+    };
 
     // Build semantic containers with section mapping
     // Calculate line ranges and build section assignments upfront
@@ -685,10 +1274,10 @@ pub fn try_add_semantic_containers<'a>(
     let mut section_assignments: Vec<(usize, Option<usize>, Vec<usize>)> = Vec::new();
 
     for (container_idx, container_with_members) in containers_with_members.iter().enumerate() {
-        let RustContainerWithMembers { container, members } = container_with_members;
+        let ContainerWithMembers { container, members } = container_with_members;
 
         // For functions (no members), assign sections directly to the container
-        if matches!(container.kind, RustContainerKind::Function) {
+        if matches!(container.kind, ContainerKind::Function) {
             let section_indices = filter_section_indices_by_range(
                 &section_ranges,
                 container.start_line,
@@ -727,10 +1316,10 @@ pub fn try_add_semantic_containers<'a>(
         .into_iter()
         .enumerate()
         .filter_map(|(container_idx, c)| {
-            let RustContainerWithMembers { container, members } = c;
+            let ContainerWithMembers { container, members } = c;
 
             let container = match container.kind {
-                RustContainerKind::Struct => {
+                ContainerKind::Struct => {
                     let fields: Vec<_> = members
                         .into_iter()
                         .enumerate()
@@ -770,7 +1359,7 @@ pub fn try_add_semantic_containers<'a>(
                         is_partial: false,
                     }
                 }
-                RustContainerKind::Impl { trait_name } => {
+                ContainerKind::Impl { trait_name } => {
                     let methods: Vec<_> = members
                         .into_iter()
                         .enumerate()
@@ -811,7 +1400,7 @@ pub fn try_add_semantic_containers<'a>(
                         is_partial: false,
                     }
                 }
-                RustContainerKind::Function => {
+                ContainerKind::Function => {
                     let section_indices = section_assignments
                         .iter()
                         .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
@@ -831,6 +1420,11 @@ pub fn try_add_semantic_containers<'a>(
                         is_partial: false,
                     }
                 }
+                // Other container kinds not yet implemented (Kotlin, Java, Python, HCL, Markdown, YAML)
+                _ => {
+                    // TODO: Implement extraction for other container kinds
+                    return None;
+                }
             };
 
             Some(container)
@@ -845,913 +1439,18 @@ pub fn try_add_semantic_containers<'a>(
     file
 }
 
+// Test modules using flat module structure
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
+mod tests_common;
 
-    #[test]
-    fn test_language_detection_rust() {
-        let path = PathBuf::from("test.rs");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Rust));
-    }
+#[cfg(test)]
+mod tests_rust;
 
-    #[test]
-    fn test_language_detection_kotlin() {
-        let path = PathBuf::from("test.kt");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Kotlin));
+#[cfg(test)]
+mod tests_python;
 
-        let path = PathBuf::from("test.kts");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Kotlin));
-    }
+#[cfg(test)]
+mod tests_kotlin;
 
-    #[test]
-    fn test_language_detection_java() {
-        let path = PathBuf::from("test.java");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Java));
-    }
-
-    #[test]
-    fn test_language_detection_hcl() {
-        let path = PathBuf::from("main.tf");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Hcl));
-
-        let path = PathBuf::from("test.hcl");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Hcl));
-    }
-
-    #[test]
-    fn test_language_detection_python() {
-        let path = PathBuf::from("test.py");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Python));
-    }
-
-    #[test]
-    fn test_language_detection_markdown() {
-        let path = PathBuf::from("README.md");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Markdown));
-    }
-
-    #[test]
-    fn test_language_detection_yaml() {
-        let path = PathBuf::from("config.yaml");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Yaml));
-
-        let path = PathBuf::from("config.yml");
-        assert_eq!(SupportedLanguage::from_path(&path), Some(SupportedLanguage::Yaml));
-    }
-
-    #[test]
-    fn test_language_detection_unsupported() {
-        let path = PathBuf::from("test.txt");
-        assert_eq!(SupportedLanguage::from_path(&path), None);
-    }
-
-    #[test]
-    fn test_language_names() {
-        assert_eq!(SupportedLanguage::Rust.name(), "Rust");
-        assert_eq!(SupportedLanguage::Kotlin.name(), "Kotlin");
-        assert_eq!(SupportedLanguage::Java.name(), "Java");
-        assert_eq!(SupportedLanguage::Hcl.name(), "HCL");
-        assert_eq!(SupportedLanguage::Python.name(), "Python");
-        assert_eq!(SupportedLanguage::Markdown.name(), "Markdown");
-        assert_eq!(SupportedLanguage::Yaml.name(), "YAML");
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_parser_creation_rust() {
-        let result = create_parser(SupportedLanguage::Rust);
-        assert!(result.is_ok());
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_simple_rust_parse() {
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let source = "fn main() { println!(\"Hello, world!\"); }";
-        let result = parse_source(&mut parser, source);
-        assert!(result.is_ok());
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_rust_struct() {
-        let source = r#"
-struct Point {
-    x: i32,
-    y: i32,
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers(&parsed);
-        assert_eq!(containers.len(), 1);
-        assert_eq!(containers[0].name, "Point");
-        assert!(matches!(
-            containers[0].kind,
-            RustContainerKind::Struct
-        ));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_rust_impl() {
-        let source = r#"
-impl Point {
-    fn new(x: i32, y: i32) -> Self {
-        Point { x, y }
-    }
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers(&parsed);
-        assert_eq!(containers.len(), 1);
-        assert_eq!(containers[0].name, "Point");
-        assert!(matches!(
-            containers[0].kind,
-            RustContainerKind::Impl { trait_name: None }
-        ));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_rust_trait_impl() {
-        let source = r#"
-impl Display for Point {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "({}, {})", self.x, self.y)
-    }
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers(&parsed);
-        assert_eq!(containers.len(), 1);
-        assert_eq!(containers[0].name, "Point");
-        if let RustContainerKind::Impl { trait_name } = &containers[0].kind {
-            assert_eq!(trait_name.as_deref(), Some("Display"));
-        } else {
-            panic!("Expected Impl with trait");
-        }
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_rust_function() {
-        let source = r#"
-fn calculate_distance(p1: &Point, p2: &Point) -> f64 {
-    let dx = p2.x - p1.x;
-    let dy = p2.y - p1.y;
-    ((dx * dx + dy * dy) as f64).sqrt()
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers(&parsed);
-        assert_eq!(containers.len(), 1);
-        assert_eq!(containers[0].name, "calculate_distance");
-        assert!(matches!(
-            containers[0].kind,
-            RustContainerKind::Function
-        ));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_mixed_rust_containers() {
-        let source = r#"
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-impl Point {
-    fn new(x: i32, y: i32) -> Self {
-        Point { x, y }
-    }
-}
-
-fn origin() -> Point {
-    Point { x: 0, y: 0 }
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers(&parsed);
-        assert_eq!(containers.len(), 3);
-
-        assert_eq!(containers[0].name, "Point");
-        assert!(matches!(containers[0].kind, RustContainerKind::Struct));
-
-        assert_eq!(containers[1].name, "Point");
-        assert!(matches!(
-            containers[1].kind,
-            RustContainerKind::Impl { trait_name: None }
-        ));
-
-        assert_eq!(containers[2].name, "origin");
-        assert!(matches!(containers[2].kind, RustContainerKind::Function));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_parse_file_versions() {
-        let old_source = r#"
-struct Point {
-    x: i32,
-}
-"#;
-        let new_source = r#"
-struct Point {
-    x: i32,
-    y: i32,
-}
-"#;
-
-        let result = parse_file_versions(SupportedLanguage::Rust, old_source, new_source);
-        assert!(result.is_ok());
-
-        let (old_parsed, new_parsed) = result.unwrap();
-        assert_eq!(old_parsed.source, old_source);
-        assert_eq!(new_parsed.source, new_source);
-
-        let old_containers = extract_rust_containers(&old_parsed);
-        let new_containers = extract_rust_containers(&new_parsed);
-
-        assert_eq!(old_containers.len(), 1);
-        assert_eq!(new_containers.len(), 1);
-        assert_eq!(old_containers[0].name, "Point");
-        assert_eq!(new_containers[0].name, "Point");
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_struct_fields() {
-        let source = r#"
-struct Point {
-    x: i32,
-    y: i32,
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers_with_members(&parsed);
-        assert_eq!(containers.len(), 1);
-
-        let container = &containers[0];
-        assert_eq!(container.container.name, "Point");
-        assert_eq!(container.members.len(), 2);
-
-        assert_eq!(container.members[0].name, "x");
-        assert!(matches!(container.members[0].kind, RustMemberKind::Field));
-
-        assert_eq!(container.members[1].name, "y");
-        assert!(matches!(container.members[1].kind, RustMemberKind::Field));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_impl_methods() {
-        let source = r#"
-impl Point {
-    fn new(x: i32, y: i32) -> Self {
-        Point { x, y }
-    }
-
-    fn distance(&self, other: &Point) -> f64 {
-        let dx = other.x - self.x;
-        let dy = other.y - self.y;
-        ((dx * dx + dy * dy) as f64).sqrt()
-    }
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers_with_members(&parsed);
-        assert_eq!(containers.len(), 1);
-
-        let container = &containers[0];
-        assert_eq!(container.container.name, "Point");
-        assert_eq!(container.members.len(), 2);
-
-        assert_eq!(container.members[0].name, "new");
-        assert!(matches!(
-            container.members[0].kind,
-            RustMemberKind::Method
-        ));
-
-        assert_eq!(container.members[1].name, "distance");
-        assert!(matches!(
-            container.members[1].kind,
-            RustMemberKind::Method
-        ));
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_extract_complete_struct_with_impl() {
-        let source = r#"
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-impl Point {
-    fn new(x: i32, y: i32) -> Self {
-        Point { x, y }
-    }
-
-    fn origin() -> Self {
-        Point { x: 0, y: 0 }
-    }
-}
-"#;
-        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
-        let tree = parse_source(&mut parser, source).unwrap();
-        let parsed = ParsedFile {
-            source: source.to_string(),
-            tree,
-        };
-
-        let containers = extract_rust_containers_with_members(&parsed);
-        assert_eq!(containers.len(), 2);
-
-        // Struct with fields
-        assert_eq!(containers[0].container.name, "Point");
-        assert!(matches!(
-            containers[0].container.kind,
-            RustContainerKind::Struct
-        ));
-        assert_eq!(containers[0].members.len(), 2);
-        assert_eq!(containers[0].members[0].name, "x");
-        assert_eq!(containers[0].members[1].name, "y");
-
-        // Impl with methods
-        assert_eq!(containers[1].container.name, "Point");
-        assert!(matches!(
-            containers[1].container.kind,
-            RustContainerKind::Impl { trait_name: None }
-        ));
-        assert_eq!(containers[1].members.len(), 2);
-        assert_eq!(containers[1].members[0].name, "new");
-        assert_eq!(containers[1].members[1].name, "origin");
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_try_add_semantic_containers() {
-        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine, SemanticContainer};
-        use std::borrow::Cow;
-
-        // Simpler test: just a function with changes
-        let old_source = r#"
-fn hello() {
-    println!("old");
-}
-
-fn world() {
-    println!("same");
-}
-"#;
-        let new_source = r#"
-fn hello() {
-    println!("new");
-}
-
-fn world() {
-    println!("same");
-}
-"#;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.rs")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: vec![
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("\n"),
-                        Cow::Borrowed("fn hello() {\n"),
-                    ],
-                },
-                Section::Changed {
-                    lines: vec![
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Removed,
-                            line: Cow::Borrowed("    println!(\"old\");\n"),
-                        },
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Added,
-                            line: Cow::Borrowed("    println!(\"new\");\n"),
-                        },
-                    ],
-                },
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("}\n"),
-                        Cow::Borrowed("\n"),
-                        Cow::Borrowed("fn world() {\n"),
-                        Cow::Borrowed("    println!(\"same\");\n"),
-                        Cow::Borrowed("}\n"),
-                    ],
-                },
-            ],
-            containers: None,
-        };
-
-        let enhanced_file = try_add_semantic_containers(file, old_source, new_source);
-
-        assert!(enhanced_file.containers.is_some());
-        let containers = enhanced_file.containers.unwrap();
-        // Should only have hello() function, world() is filtered out (no editable changes)
-        assert_eq!(containers.len(), 1);
-
-        // Check function
-        match &containers[0] {
-            SemanticContainer::Function {
-                name,
-                section_indices,
-                is_checked: _,
-                is_partial: _,
-            } => {
-                assert_eq!(name, "hello");
-                // Should have sections that fall within the function's line range
-                assert!(!section_indices.is_empty());
-                // At minimum, should have the Changed section
-                assert!(section_indices.contains(&1));
-            }
-            _ => panic!("Expected Function container"),
-        }
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_try_add_semantic_containers_unsupported_language() {
-        use crate::{File, FileMode};
-        use std::borrow::Cow;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.txt")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: Vec::new(),
-            containers: None,
-        };
-
-        let enhanced_file = try_add_semantic_containers(file, "old", "new");
-
-        // Should return unchanged for unsupported language
-        assert!(enhanced_file.containers.is_none());
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_exact_match() {
-        let section_ranges = vec![
-            SectionLineRange {
-                section_index: 0,
-                start_line: 0,
-                end_line: 5,
-            },
-            SectionLineRange {
-                section_index: 1,
-                start_line: 10,
-                end_line: 15,
-            },
-            SectionLineRange {
-                section_index: 2,
-                start_line: 20,
-                end_line: 25,
-            },
-        ];
-
-        let indices = filter_section_indices_by_range(&section_ranges, 10, 15);
-        assert_eq!(indices, vec![1]);
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_overlap() {
-        let section_ranges = vec![
-            SectionLineRange {
-                section_index: 0,
-                start_line: 0,
-                end_line: 10,
-            },
-            SectionLineRange {
-                section_index: 1,
-                start_line: 8,
-                end_line: 15,
-            },
-            SectionLineRange {
-                section_index: 2,
-                start_line: 20,
-                end_line: 25,
-            },
-        ];
-
-        // Range [5, 12) should overlap with sections 0 and 1
-        let indices = filter_section_indices_by_range(&section_ranges, 5, 12);
-        assert_eq!(indices, vec![0, 1]);
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_no_overlap() {
-        let section_ranges = vec![
-            SectionLineRange {
-                section_index: 0,
-                start_line: 0,
-                end_line: 5,
-            },
-            SectionLineRange {
-                section_index: 1,
-                start_line: 10,
-                end_line: 15,
-            },
-        ];
-
-        // Range [6, 9) doesn't overlap with any section
-        let indices = filter_section_indices_by_range(&section_ranges, 6, 9);
-        assert_eq!(indices, Vec::<usize>::new());
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_contains_all() {
-        let section_ranges = vec![
-            SectionLineRange {
-                section_index: 0,
-                start_line: 5,
-                end_line: 10,
-            },
-            SectionLineRange {
-                section_index: 1,
-                start_line: 15,
-                end_line: 20,
-            },
-            SectionLineRange {
-                section_index: 2,
-                start_line: 25,
-                end_line: 30,
-            },
-        ];
-
-        // Range [0, 100) contains all sections
-        let indices = filter_section_indices_by_range(&section_ranges, 0, 100);
-        assert_eq!(indices, vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_partial_overlap_start() {
-        let section_ranges = vec![SectionLineRange {
-            section_index: 0,
-            start_line: 10,
-            end_line: 20,
-        }];
-
-        // Range [5, 15) overlaps with section at the start
-        let indices = filter_section_indices_by_range(&section_ranges, 5, 15);
-        assert_eq!(indices, vec![0]);
-    }
-
-    #[test]
-    fn test_filter_section_indices_by_range_partial_overlap_end() {
-        let section_ranges = vec![SectionLineRange {
-            section_index: 0,
-            start_line: 10,
-            end_line: 20,
-        }];
-
-        // Range [15, 25) overlaps with section at the end
-        let indices = filter_section_indices_by_range(&section_ranges, 15, 25);
-        assert_eq!(indices, vec![0]);
-    }
-
-    #[test]
-    fn test_calculate_section_line_ranges() {
-        use crate::{ChangeType, Section, SectionChangedLine};
-        use std::borrow::Cow;
-
-        let sections = vec![
-            Section::Unchanged {
-                lines: vec![
-                    Cow::Borrowed("line1\n"),
-                    Cow::Borrowed("line2\n"),
-                    Cow::Borrowed("line3\n"),
-                ],
-            },
-            Section::Changed {
-                lines: vec![
-                    SectionChangedLine {
-                        is_checked: false,
-                        change_type: ChangeType::Removed,
-                        line: Cow::Borrowed("old\n"),
-                    },
-                    SectionChangedLine {
-                        is_checked: false,
-                        change_type: ChangeType::Added,
-                        line: Cow::Borrowed("new1\n"),
-                    },
-                    SectionChangedLine {
-                        is_checked: false,
-                        change_type: ChangeType::Added,
-                        line: Cow::Borrowed("new2\n"),
-                    },
-                ],
-            },
-            Section::Unchanged {
-                lines: vec![Cow::Borrowed("line4\n"), Cow::Borrowed("line5\n")],
-            },
-        ];
-
-        let ranges = calculate_section_line_ranges(&sections);
-
-        assert_eq!(ranges.len(), 3);
-        assert_eq!(ranges[0].section_index, 0);
-        assert_eq!(ranges[0].start_line, 0);
-        assert_eq!(ranges[0].end_line, 3); // 3 lines
-
-        assert_eq!(ranges[1].section_index, 1);
-        assert_eq!(ranges[1].start_line, 3);
-        assert_eq!(ranges[1].end_line, 5); // 2 added lines (removed doesn't count)
-
-        assert_eq!(ranges[2].section_index, 2);
-        assert_eq!(ranges[2].start_line, 5);
-        assert_eq!(ranges[2].end_line, 7); // 2 lines
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_container_filtering_empty_function() {
-        use crate::{File, FileMode, Section};
-        use std::borrow::Cow;
-
-        // Function with only unchanged sections - should be filtered out
-        let source = r#"
-fn unchanged_function() {
-    println!("no changes here");
-}
-"#;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.rs")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: vec![Section::Unchanged {
-                lines: vec![
-                    Cow::Borrowed("fn unchanged_function() {\n"),
-                    Cow::Borrowed("    println!(\"no changes here\");\n"),
-                    Cow::Borrowed("}\n"),
-                ],
-            }],
-            containers: None,
-        };
-
-        let result = try_add_semantic_containers(file, source, source);
-
-        // Should have no containers since the function has no editable changes
-        assert!(result.containers.is_none());
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_container_filtering_function_with_changes() {
-        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine};
-        use std::borrow::Cow;
-
-        // Function with changes - should be kept
-        let old_source = r#"
-fn modified_function() {
-    println!("old");
-}
-"#;
-
-        let new_source = r#"
-fn modified_function() {
-    println!("new");
-}
-"#;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.rs")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: vec![
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("\n"),
-                        Cow::Borrowed("fn modified_function() {\n"),
-                    ],
-                },
-                Section::Changed {
-                    lines: vec![
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Removed,
-                            line: Cow::Borrowed("    println!(\"old\");\n"),
-                        },
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Added,
-                            line: Cow::Borrowed("    println!(\"new\");\n"),
-                        },
-                    ],
-                },
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("}\n"),
-                    ],
-                },
-            ],
-            containers: None,
-        };
-
-        let result = try_add_semantic_containers(file, old_source, new_source);
-
-        // Should have containers with the function
-        assert!(result.containers.is_some());
-        let containers = result.containers.unwrap();
-        assert_eq!(containers.len(), 1);
-
-        match &containers[0] {
-            crate::SemanticContainer::Function { name, section_indices, .. } => {
-                assert_eq!(name, "modified_function");
-                // Should have sections that fall within the function's line range
-                // With context preservation, this includes both changed and unchanged sections
-                assert!(!section_indices.is_empty());
-                // At minimum, should have the Changed section
-                assert!(section_indices.contains(&1));
-            }
-            _ => panic!("Expected Function container"),
-        }
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_container_filtering_struct_with_no_field_changes() {
-        use crate::{File, FileMode, Section};
-        use std::borrow::Cow;
-
-        // Struct where fields have no changes - should be filtered out
-        let source = r#"
-struct MyStruct {
-    field1: i32,
-    field2: String,
-}
-"#;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.rs")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: vec![Section::Unchanged {
-                lines: vec![
-                    Cow::Borrowed("struct MyStruct {\n"),
-                    Cow::Borrowed("    field1: i32,\n"),
-                    Cow::Borrowed("    field2: String,\n"),
-                    Cow::Borrowed("}\n"),
-                ],
-            }],
-            containers: None,
-        };
-
-        let result = try_add_semantic_containers(file, source, source);
-
-        // Should have no containers since no fields have changes
-        assert!(result.containers.is_none());
-    }
-
-    #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn test_container_filtering_impl_with_mixed_methods() {
-        use crate::{ChangeType, File, FileMode, Section, SectionChangedLine};
-        use std::borrow::Cow;
-
-        // Impl with one changed method and one unchanged - should keep only changed method
-        let old_source = r#"
-impl MyStruct {
-    fn unchanged_method(&self) {
-        println!("same");
-    }
-
-    fn changed_method(&self) {
-        println!("old");
-    }
-}
-"#;
-
-        let new_source = r#"
-impl MyStruct {
-    fn unchanged_method(&self) {
-        println!("same");
-    }
-
-    fn changed_method(&self) {
-        println!("new");
-    }
-}
-"#;
-
-        let file = File {
-            old_path: None,
-            path: Cow::Borrowed(std::path::Path::new("test.rs")),
-            file_mode: FileMode::FILE_DEFAULT,
-            sections: vec![
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("\n"),
-                        Cow::Borrowed("impl MyStruct {\n"),
-                        Cow::Borrowed("    fn unchanged_method(&self) {\n"),
-                        Cow::Borrowed("        println!(\"same\");\n"),
-                        Cow::Borrowed("    }\n"),
-                        Cow::Borrowed("\n"),
-                        Cow::Borrowed("    fn changed_method(&self) {\n"),
-                    ],
-                },
-                Section::Changed {
-                    lines: vec![
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Removed,
-                            line: Cow::Borrowed("        println!(\"old\");\n"),
-                        },
-                        SectionChangedLine {
-                            is_checked: false,
-                            change_type: ChangeType::Added,
-                            line: Cow::Borrowed("        println!(\"new\");\n"),
-                        },
-                    ],
-                },
-                Section::Unchanged {
-                    lines: vec![
-                        Cow::Borrowed("    }\n"),
-                        Cow::Borrowed("}\n"),
-                    ],
-                },
-            ],
-            containers: None,
-        };
-
-        let result = try_add_semantic_containers(file, old_source, new_source);
-
-        // Should have containers with the impl
-        assert!(result.containers.is_some());
-        let containers = result.containers.unwrap();
-        assert_eq!(containers.len(), 1);
-
-        match &containers[0] {
-            crate::SemanticContainer::Impl { type_name, methods, .. } => {
-                assert_eq!(type_name, "MyStruct");
-                // Should only have 1 method (the changed one)
-                assert_eq!(methods.len(), 1);
-                match &methods[0] {
-                    crate::SemanticMember::Method { name, section_indices, .. } => {
-                        assert_eq!(name, "changed_method");
-                        // Should have sections within the method's line range
-                        assert!(!section_indices.is_empty());
-                        // At minimum, should have the Changed section
-                        assert!(section_indices.contains(&1));
-                    }
-                    _ => panic!("Expected Method member"),
-                }
-            }
-            _ => panic!("Expected Impl container"),
-        }
-    }
-}
+#[cfg(test)]
+mod tests_java;
