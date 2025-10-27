@@ -235,6 +235,78 @@ pub enum SemanticMember<'a> {
     },
 }
 
+#[cfg(feature = "tree-sitter")]
+impl<'a> SemanticContainer<'a> {
+    /// Set the checked state for this container and all its nested items.
+    pub fn set_checked(&mut self, is_checked: bool) {
+        match self {
+            SemanticContainer::Struct {
+                fields,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            } => {
+                *container_checked = is_checked;
+                *is_partial = false;
+                for field in fields {
+                    field.set_checked(is_checked);
+                }
+            }
+            SemanticContainer::Impl {
+                methods,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            } => {
+                *container_checked = is_checked;
+                *is_partial = false;
+                for method in methods {
+                    method.set_checked(is_checked);
+                }
+            }
+            SemanticContainer::Function {
+                sections,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            } => {
+                *container_checked = is_checked;
+                *is_partial = false;
+                for section in sections {
+                    section.set_checked(is_checked);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tree-sitter")]
+impl<'a> SemanticMember<'a> {
+    /// Set the checked state for this member and all its sections.
+    pub fn set_checked(&mut self, is_checked: bool) {
+        match self {
+            SemanticMember::Field {
+                sections,
+                is_checked: member_checked,
+                is_partial,
+                ..
+            }
+            | SemanticMember::Method {
+                sections,
+                is_checked: member_checked,
+                is_partial,
+                ..
+            } => {
+                *member_checked = is_checked;
+                *is_partial = false;
+                for section in sections {
+                    section.set_checked(is_checked);
+                }
+            }
+        }
+    }
+}
+
 /// The state of a file to be recorded.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]

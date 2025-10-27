@@ -153,6 +153,7 @@ pub fn create_file(
         path: Cow::Owned(right_display_path),
         file_mode: left_file_mode,
         sections,
+        #[cfg(feature = "tree-sitter")]
         containers: None,
     };
 
@@ -252,6 +253,7 @@ pub fn create_merge_file(
         path: Cow::Owned(output_path),
         file_mode: left_file_mode,
         sections,
+        #[cfg(feature = "tree-sitter")]
         containers: None,
     })
 }

@@ -61,6 +61,21 @@ struct LineKey {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+struct ContainerKey {
+    commit_idx: usize,
+    file_idx: usize,
+    container_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+struct MemberKey {
+    commit_idx: usize,
+    file_idx: usize,
+    container_idx: usize,
+    member_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 enum QuitDialogButtonId {
     Quit,
     GoBack,
@@ -70,6 +85,8 @@ enum QuitDialogButtonId {
 enum SelectionKey {
     None,
     File(FileKey),
+    Container(ContainerKey),
+    Member(MemberKey),
     Section(SectionKey),
     Line(LineKey),
 }
@@ -919,7 +936,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                 let file_toggled = self.file_tristate(file_key).unwrap();
                 let file_expanded = self.file_expanded(file_key);
                 let is_focused = match self.selection_key {
-                    SelectionKey::None | SelectionKey::Section(_) | SelectionKey::Line(_) => false,
+                    SelectionKey::None | SelectionKey::Container(_) | SelectionKey::Member(_)
+                    | SelectionKey::Section(_) | SelectionKey::Line(_) => false,
                     SelectionKey::File(selected_file_key) => file_key == selected_file_key,
                 };
                 FileView {
@@ -969,6 +987,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                             let is_focused = match self.selection_key {
                                 SelectionKey::None
                                 | SelectionKey::File(_)
+                                | SelectionKey::Container(_)
+                                | SelectionKey::Member(_)
                                 | SelectionKey::Line(_) => false,
                                 SelectionKey::Section(selection_section_key) => {
                                     selection_section_key == section_key
@@ -998,7 +1018,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     is_focused,
                                 },
                                 selection: match self.selection_key {
-                                    SelectionKey::None | SelectionKey::File(_) => None,
+                                    SelectionKey::None | SelectionKey::File(_)
+                                    | SelectionKey::Container(_) | SelectionKey::Member(_) => None,
                                     SelectionKey::Section(selected_section_key) => {
                                         if selected_section_key == section_key {
                                             Some(SectionSelection::SectionHeader)
@@ -1302,40 +1323,114 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     commit_idx,
                     file_idx,
                 }));
-                for (section_idx, section) in file.sections.iter().enumerate() {
-                    match section {
-                        Section::Unchanged { .. } => {}
-                        Section::Changed { lines } => {
-                            result.push(SelectionKey::Section(SectionKey {
-                                commit_idx,
-                                file_idx,
-                                section_idx,
-                            }));
-                            for (line_idx, _line) in lines.iter().enumerate() {
-                                result.push(SelectionKey::Line(LineKey {
-                                    commit_idx,
-                                    file_idx,
-                                    section_idx,
-                                    line_idx,
-                                }));
+
+                // Check if this file has semantic containers
+                #[cfg(feature = "tree-sitter")]
+                if let Some(ref containers) = file.containers {
+                    // Semantic-first navigation: render containers -> members -> sections
+                    for (container_idx, container) in containers.iter().enumerate() {
+                        result.push(SelectionKey::Container(ContainerKey {
+                            commit_idx,
+                            file_idx,
+                            container_idx,
+                        }));
+
+                        // Render members (fields/methods) if this container has them
+                        match container {
+                            crate::SemanticContainer::Struct { fields, .. } => {
+                                for (member_idx, member) in fields.iter().enumerate() {
+                                    result.push(SelectionKey::Member(MemberKey {
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        member_idx,
+                                    }));
+                                    // Add sections within this member
+                                    self.add_member_sections(&mut result, commit_idx, file_idx, member);
+                                }
+                            }
+                            crate::SemanticContainer::Impl { methods, .. } => {
+                                for (member_idx, member) in methods.iter().enumerate() {
+                                    result.push(SelectionKey::Member(MemberKey {
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        member_idx,
+                                    }));
+                                    // Add sections within this member
+                                    self.add_member_sections(&mut result, commit_idx, file_idx, member);
+                                }
+                            }
+                            crate::SemanticContainer::Function { sections, .. } => {
+                                // Functions have sections directly (no members)
+                                for (section_idx, section) in sections.iter().enumerate() {
+                                    self.add_section_to_keys(&mut result, commit_idx, file_idx, section_idx, section);
+                                }
                             }
                         }
-                        Section::FileMode {
-                            is_checked: _,
-                            mode: _,
-                        }
-                        | Section::Binary { .. } => {
-                            result.push(SelectionKey::Section(SectionKey {
-                                commit_idx,
-                                file_idx,
-                                section_idx,
-                            }));
-                        }
                     }
+                    continue; // Skip traditional section rendering
+                }
+
+                // Traditional diff-first navigation: render sections directly
+                for (section_idx, section) in file.sections.iter().enumerate() {
+                    self.add_section_to_keys(&mut result, commit_idx, file_idx, section_idx, section);
                 }
             }
         }
         result
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn add_member_sections(
+        &self,
+        result: &mut Vec<SelectionKey>,
+        commit_idx: usize,
+        file_idx: usize,
+        member: &crate::SemanticMember,
+    ) {
+        let sections = match member {
+            crate::SemanticMember::Field { sections, .. } => sections,
+            crate::SemanticMember::Method { sections, .. } => sections,
+        };
+        for (section_idx, section) in sections.iter().enumerate() {
+            self.add_section_to_keys(result, commit_idx, file_idx, section_idx, section);
+        }
+    }
+
+    fn add_section_to_keys(
+        &self,
+        result: &mut Vec<SelectionKey>,
+        commit_idx: usize,
+        file_idx: usize,
+        section_idx: usize,
+        section: &Section,
+    ) {
+        match section {
+            Section::Unchanged { .. } => {}
+            Section::Changed { lines } => {
+                result.push(SelectionKey::Section(SectionKey {
+                    commit_idx,
+                    file_idx,
+                    section_idx,
+                }));
+                for (line_idx, _line) in lines.iter().enumerate() {
+                    result.push(SelectionKey::Line(LineKey {
+                        commit_idx,
+                        file_idx,
+                        section_idx,
+                        line_idx,
+                    }));
+                }
+            }
+            Section::FileMode { .. } | Section::Binary { .. } => {
+                result.push(SelectionKey::Section(SectionKey {
+                    commit_idx,
+                    file_idx,
+                    section_idx,
+                }));
+            }
+        }
     }
 
     fn find_selection(&self) -> (Vec<SelectionKey>, Option<usize>) {
@@ -1347,6 +1442,29 @@ impl<'state, 'input> Recorder<'state, 'input> {
             .filter(|key| match key {
                 SelectionKey::None => false,
                 SelectionKey::File(_) => true,
+                SelectionKey::Container(container_key) => {
+                    let file_key = FileKey {
+                        commit_idx: container_key.commit_idx,
+                        file_idx: container_key.file_idx,
+                    };
+                    match self.file_expanded(file_key) {
+                        Tristate::False => false,
+                        Tristate::Partial | Tristate::True => true,
+                    }
+                }
+                SelectionKey::Member(member_key) => {
+                    let file_key = FileKey {
+                        commit_idx: member_key.commit_idx,
+                        file_idx: member_key.file_idx,
+                    };
+                    let container_key = ContainerKey {
+                        commit_idx: member_key.commit_idx,
+                        file_idx: member_key.file_idx,
+                        container_idx: member_key.container_idx,
+                    };
+                    self.expanded_items.contains(&SelectionKey::File(file_key))
+                        && self.expanded_items.contains(&SelectionKey::Container(container_key))
+                }
                 SelectionKey::Section(section_key) => {
                     let file_key = FileKey {
                         commit_idx: section_key.commit_idx,
@@ -1497,14 +1615,29 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     (SelectionKey::None, _) => true,
                     (_, SelectionKey::None) => false, // shouldn't happen
 
+                    // From File, can select Container (semantic) or Section (traditional)
                     (SelectionKey::File(_), SelectionKey::File(_)) => false,
+                    (SelectionKey::File(_), SelectionKey::Container(_)) => true,
                     (SelectionKey::File(_), SelectionKey::Section(_)) => true,
-                    (SelectionKey::File(_), SelectionKey::Line(_)) => false, // shouldn't happen
+                    (SelectionKey::File(_), SelectionKey::Member(_) | SelectionKey::Line(_)) => false,
 
-                    (SelectionKey::Section(_), SelectionKey::File(_))
+                    // From Container, can select Member or Section
+                    (SelectionKey::Container(_), SelectionKey::File(_) | SelectionKey::Container(_)) => false,
+                    (SelectionKey::Container(_), SelectionKey::Member(_)) => true,
+                    (SelectionKey::Container(_), SelectionKey::Section(_)) => true,
+                    (SelectionKey::Container(_), SelectionKey::Line(_)) => false,
+
+                    // From Member, can select Section
+                    (SelectionKey::Member(_), SelectionKey::File(_) | SelectionKey::Container(_) | SelectionKey::Member(_)) => false,
+                    (SelectionKey::Member(_), SelectionKey::Section(_)) => true,
+                    (SelectionKey::Member(_), SelectionKey::Line(_)) => false,
+
+                    // From Section, can select Line
+                    (SelectionKey::Section(_), SelectionKey::File(_) | SelectionKey::Container(_) | SelectionKey::Member(_))
                     | (SelectionKey::Section(_), SelectionKey::Section(_)) => false,
                     (SelectionKey::Section(_), SelectionKey::Line(_)) => true,
 
+                    // From Line, can't go deeper
                     (SelectionKey::Line(_), _) => false,
                 }
             })
@@ -1516,6 +1649,46 @@ impl<'state, 'input> Recorder<'state, 'input> {
             SelectionKey::None => StateUpdate::None,
             selection_key @ SelectionKey::File(_) => {
                 StateUpdate::SetExpandItem(selection_key, false)
+            }
+            selection_key @ SelectionKey::Container(ContainerKey {
+                commit_idx,
+                file_idx,
+                container_idx: _,
+            }) => {
+                // If folding is requested and the selection is expanded,
+                // collapse it. Otherwise, move the selection to the file.
+                if fold_section && self.expanded_items.contains(&selection_key) {
+                    StateUpdate::SetExpandItem(selection_key, false)
+                } else {
+                    StateUpdate::SelectItem {
+                        selection_key: SelectionKey::File(FileKey {
+                            commit_idx,
+                            file_idx,
+                        }),
+                        ensure_in_viewport: true,
+                    }
+                }
+            }
+            selection_key @ SelectionKey::Member(MemberKey {
+                commit_idx,
+                file_idx,
+                container_idx,
+                member_idx: _,
+            }) => {
+                // If folding is requested and the selection is expanded,
+                // collapse it. Otherwise, move the selection to the container.
+                if fold_section && self.expanded_items.contains(&selection_key) {
+                    StateUpdate::SetExpandItem(selection_key, false)
+                } else {
+                    StateUpdate::SelectItem {
+                        selection_key: SelectionKey::Container(ContainerKey {
+                            commit_idx,
+                            file_idx,
+                            container_idx,
+                        }),
+                        ensure_in_viewport: true,
+                    }
+                }
             }
             selection_key @ SelectionKey::Section(SectionKey {
                 commit_idx,
@@ -1564,20 +1737,15 @@ impl<'state, 'input> Recorder<'state, 'input> {
             .find(|key| match (self.selection_key, key) {
                 (SelectionKey::None, _)
                 | (SelectionKey::File(_), SelectionKey::File(_))
+                | (SelectionKey::Container(_), SelectionKey::Container(_))
+                | (SelectionKey::Member(_), SelectionKey::Member(_))
                 | (SelectionKey::Section(_), SelectionKey::Section(_))
                 | (SelectionKey::Line(_), SelectionKey::Line(_)) => true,
-                (
-                    SelectionKey::File(_),
-                    SelectionKey::None | SelectionKey::Section(_) | SelectionKey::Line(_),
-                )
-                | (
-                    SelectionKey::Section(_),
-                    SelectionKey::None | SelectionKey::File(_) | SelectionKey::Line(_),
-                )
-                | (
-                    SelectionKey::Line(_),
-                    SelectionKey::None | SelectionKey::File(_) | SelectionKey::Section(_),
-                ) => false,
+                (SelectionKey::File(_), SelectionKey::None | SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Section(_) | SelectionKey::Line(_))
+                | (SelectionKey::Container(_), SelectionKey::None | SelectionKey::File(_) | SelectionKey::Member(_) | SelectionKey::Section(_) | SelectionKey::Line(_))
+                | (SelectionKey::Member(_), SelectionKey::None | SelectionKey::File(_) | SelectionKey::Container(_) | SelectionKey::Section(_) | SelectionKey::Line(_))
+                | (SelectionKey::Section(_), SelectionKey::None | SelectionKey::File(_) | SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Line(_))
+                | (SelectionKey::Line(_), SelectionKey::None | SelectionKey::File(_) | SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Section(_)) => false,
             })
             .unwrap_or(self.selection_key)
     }
@@ -1598,9 +1766,11 @@ impl<'state, 'input> Recorder<'state, 'input> {
     ) -> Option<Rect> {
         let id = match selection_key {
             SelectionKey::None => return None,
-            SelectionKey::File(_) | SelectionKey::Section(_) | SelectionKey::Line(_) => {
-                ComponentId::SelectableItem(selection_key)
-            }
+            SelectionKey::File(_)
+            | SelectionKey::Container(_)
+            | SelectionKey::Member(_)
+            | SelectionKey::Section(_)
+            | SelectionKey::Line(_) => ComponentId::SelectableItem(selection_key),
         };
         match drawn_rects.get(&id) {
             Some(DrawnRect { rect, timestamp: _ }) => Some(*rect),
@@ -1626,7 +1796,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
         let menu_bar_height = 1;
         let sticky_file_header_height = match selection_key {
             SelectionKey::None | SelectionKey::File(_) => 0,
-            SelectionKey::Section(_) | SelectionKey::Line(_) => 1,
+            SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Section(_) | SelectionKey::Line(_) => 1,
         };
         let top_margin = sticky_file_header_height + menu_bar_height;
 
@@ -1816,6 +1986,44 @@ impl<'state, 'input> Recorder<'state, 'input> {
 
                 None
             }
+            SelectionKey::Container(container_key) => {
+                // Toggle a semantic container: toggle all its members/sections
+                #[cfg(feature = "tree-sitter")]
+                {
+                    let tristate = self.container_tristate(container_key)?;
+                    let is_checked_new = match tristate {
+                        Tristate::False => true,
+                        Tristate::Partial | Tristate::True => false,
+                    };
+                    self.visit_container(container_key, |container| {
+                        container.set_checked(is_checked_new);
+                    })?;
+                }
+                #[cfg(not(feature = "tree-sitter"))]
+                {
+                    let _ = container_key; // Suppress unused warning
+                }
+                None
+            }
+            SelectionKey::Member(member_key) => {
+                // Toggle a semantic member: toggle all its sections
+                #[cfg(feature = "tree-sitter")]
+                {
+                    let tristate = self.member_tristate(member_key)?;
+                    let is_checked_new = match tristate {
+                        Tristate::False => true,
+                        Tristate::Partial | Tristate::True => false,
+                    };
+                    self.visit_member(member_key, |member| {
+                        member.set_checked(is_checked_new);
+                    })?;
+                }
+                #[cfg(not(feature = "tree-sitter"))]
+                {
+                    let _ = member_key; // Suppress unused warning
+                }
+                None
+            }
             SelectionKey::Section(section_key) => {
                 let tristate = self.section_tristate(section_key)?;
                 let is_checked_new = match tristate {
@@ -1969,6 +2177,32 @@ impl<'state, 'input> Recorder<'state, 'input> {
     fn expand_item_ancestors(&mut self, selection: SelectionKey) {
         match selection {
             SelectionKey::None | SelectionKey::File(_) => {}
+            SelectionKey::Container(ContainerKey {
+                commit_idx,
+                file_idx,
+                container_idx: _,
+            }) => {
+                self.expanded_items.insert(SelectionKey::File(FileKey {
+                    commit_idx,
+                    file_idx,
+                }));
+            }
+            SelectionKey::Member(MemberKey {
+                commit_idx,
+                file_idx,
+                container_idx,
+                member_idx: _,
+            }) => {
+                self.expanded_items.insert(SelectionKey::File(FileKey {
+                    commit_idx,
+                    file_idx,
+                }));
+                self.expanded_items.insert(SelectionKey::Container(ContainerKey {
+                    commit_idx,
+                    file_idx,
+                    container_idx,
+                }));
+            }
             SelectionKey::Section(SectionKey {
                 commit_idx,
                 file_idx,
@@ -2015,6 +2249,16 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     self.expanded_items.remove(&SelectionKey::File(file_key));
                 }
             }
+            SelectionKey::Container(container_key) => {
+                if !self.expanded_items.insert(SelectionKey::Container(container_key)) {
+                    self.expanded_items.remove(&SelectionKey::Container(container_key));
+                }
+            }
+            SelectionKey::Member(member_key) => {
+                if !self.expanded_items.insert(SelectionKey::Member(member_key)) {
+                    self.expanded_items.remove(&SelectionKey::Member(member_key));
+                }
+            }
             SelectionKey::Section(section_key) => {
                 if !self
                     .expanded_items
@@ -2037,7 +2281,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
             .into_iter()
             .filter(|selection_key| match selection_key {
                 SelectionKey::None | SelectionKey::File(_) | SelectionKey::Line(_) => false,
-                SelectionKey::Section(_) => true,
+                SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Section(_) => {
+                    true
+                }
             })
             .collect();
     }
@@ -2048,7 +2294,18 @@ impl<'state, 'input> Recorder<'state, 'input> {
             // Select an ancestor file key that will still be visible.
             self.selection_key = match self.selection_key {
                 selection_key @ (SelectionKey::None | SelectionKey::File(_)) => selection_key,
-                SelectionKey::Section(SectionKey {
+                SelectionKey::Container(ContainerKey {
+                    commit_idx,
+                    file_idx,
+                    container_idx: _,
+                })
+                | SelectionKey::Member(MemberKey {
+                    commit_idx,
+                    file_idx,
+                    container_idx: _,
+                    member_idx: _,
+                })
+                | SelectionKey::Section(SectionKey {
                     commit_idx,
                     file_idx,
                     section_idx: _,
@@ -2274,6 +2531,190 @@ impl<'state, 'input> Recorder<'state, 'input> {
     fn section_tristate(&self, section_key: SectionKey) -> Result<Tristate, RecordError> {
         let section = self.section(section_key)?;
         Ok(section.tristate())
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn container(
+        &self,
+        container_key: ContainerKey,
+    ) -> Result<&crate::SemanticContainer<'_>, RecordError> {
+        let ContainerKey {
+            commit_idx,
+            file_idx,
+            container_idx,
+        } = container_key;
+        let file = self.file(FileKey {
+            commit_idx,
+            file_idx,
+        })?;
+        match &file.containers {
+            Some(containers) => match containers.get(container_idx) {
+                Some(container) => Ok(container),
+                None => Err(RecordError::Bug(format!(
+                    "Out-of-bounds container key: {container_key:?}"
+                ))),
+            },
+            None => Err(RecordError::Bug(format!(
+                "No containers found for file at container key: {container_key:?}"
+            ))),
+        }
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn visit_container<T>(
+        &mut self,
+        container_key: ContainerKey,
+        f: impl Fn(&mut crate::SemanticContainer) -> T,
+    ) -> Result<T, RecordError> {
+        let ContainerKey {
+            commit_idx: _,
+            file_idx,
+            container_idx,
+        } = container_key;
+        let file = match self.state.files.get_mut(file_idx) {
+            Some(file) => file,
+            None => {
+                return Err(RecordError::Bug(format!(
+                    "Out-of-bounds file for container key: {container_key:?}"
+                )));
+            }
+        };
+        match &mut file.containers {
+            Some(containers) => match containers.get_mut(container_idx) {
+                Some(container) => Ok(f(container)),
+                None => Err(RecordError::Bug(format!(
+                    "Out-of-bounds container key: {container_key:?}"
+                ))),
+            },
+            None => Err(RecordError::Bug(format!(
+                "No containers found for file at container key: {container_key:?}"
+            ))),
+        }
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn container_tristate(
+        &self,
+        container_key: ContainerKey,
+    ) -> Result<Tristate, RecordError> {
+        let container = self.container(container_key)?;
+        Ok(match container {
+            crate::SemanticContainer::Struct { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Impl { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Function { is_checked, is_partial, .. } => {
+                if *is_checked {
+                    if *is_partial {
+                        Tristate::Partial
+                    } else {
+                        Tristate::True
+                    }
+                } else {
+                    Tristate::False
+                }
+            }
+        })
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn member(&self, member_key: MemberKey) -> Result<&crate::SemanticMember<'_>, RecordError> {
+        let MemberKey {
+            commit_idx,
+            file_idx,
+            container_idx,
+            member_idx,
+        } = member_key;
+        let container = self.container(ContainerKey {
+            commit_idx,
+            file_idx,
+            container_idx,
+        })?;
+        let members = match container {
+            crate::SemanticContainer::Struct { fields, .. } => fields,
+            crate::SemanticContainer::Impl { methods, .. } => methods,
+            crate::SemanticContainer::Function { .. } => {
+                return Err(RecordError::Bug(format!(
+                    "Functions don't have members: {member_key:?}"
+                )));
+            }
+        };
+        match members.get(member_idx) {
+            Some(member) => Ok(member),
+            None => Err(RecordError::Bug(format!(
+                "Out-of-bounds member key: {member_key:?}"
+            ))),
+        }
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn visit_member<T>(
+        &mut self,
+        member_key: MemberKey,
+        f: impl Fn(&mut crate::SemanticMember) -> T,
+    ) -> Result<T, RecordError> {
+        let MemberKey {
+            commit_idx: _,
+            file_idx,
+            container_idx,
+            member_idx,
+        } = member_key;
+        let file = match self.state.files.get_mut(file_idx) {
+            Some(file) => file,
+            None => {
+                return Err(RecordError::Bug(format!(
+                    "Out-of-bounds file for member key: {member_key:?}"
+                )));
+            }
+        };
+        let containers = match &mut file.containers {
+            Some(containers) => containers,
+            None => {
+                return Err(RecordError::Bug(format!(
+                    "No containers found for file at member key: {member_key:?}"
+                )));
+            }
+        };
+        let container = match containers.get_mut(container_idx) {
+            Some(container) => container,
+            None => {
+                return Err(RecordError::Bug(format!(
+                    "Out-of-bounds container for member key: {member_key:?}"
+                )));
+            }
+        };
+        let members = match container {
+            crate::SemanticContainer::Struct { fields, .. } => fields,
+            crate::SemanticContainer::Impl { methods, .. } => methods,
+            crate::SemanticContainer::Function { .. } => {
+                return Err(RecordError::Bug(format!(
+                    "Functions don't have members: {member_key:?}"
+                )));
+            }
+        };
+        match members.get_mut(member_idx) {
+            Some(member) => Ok(f(member)),
+            None => Err(RecordError::Bug(format!(
+                "Out-of-bounds member key: {member_key:?}"
+            ))),
+        }
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn member_tristate(&self, member_key: MemberKey) -> Result<Tristate, RecordError> {
+        let member = self.member(member_key)?;
+        Ok(match member {
+            crate::SemanticMember::Field { is_checked, is_partial, .. }
+            | crate::SemanticMember::Method { is_checked, is_partial, .. } => {
+                if *is_checked {
+                    if *is_partial {
+                        Tristate::Partial
+                    } else {
+                        Tristate::True
+                    }
+                } else {
+                    Tristate::False
+                }
+            }
+        })
     }
 
     fn visit_line<T>(
@@ -2831,6 +3272,31 @@ impl Component for FileView<'_> {
             }
         }
     }
+}
+
+#[cfg(feature = "tree-sitter")]
+#[derive(Clone, Debug)]
+struct ContainerView<'a> {
+    debug: bool,
+    container_key: ContainerKey,
+    toggle_box: TristateBox<ComponentId>,
+    expand_box: TristateBox<ComponentId>,
+    is_header_selected: bool,
+    container: &'a crate::SemanticContainer<'a>,
+    member_views: Vec<MemberView<'a>>,
+    section_views: Vec<SectionView<'a>>,  // For functions without members
+}
+
+#[cfg(feature = "tree-sitter")]
+#[derive(Clone, Debug)]
+struct MemberView<'a> {
+    debug: bool,
+    member_key: MemberKey,
+    toggle_box: TristateBox<ComponentId>,
+    expand_box: TristateBox<ComponentId>,
+    is_header_selected: bool,
+    member: &'a crate::SemanticMember<'a>,
+    section_views: Vec<SectionView<'a>>,
 }
 
 struct FileViewHeader<'a> {
