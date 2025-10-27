@@ -38,6 +38,17 @@ pub fn create_file(
     } = filesystem.read_file_info(&right_path)?;
     let mut sections = Vec::new();
 
+    // Extract text contents for semantic enhancement (if both are text)
+    // We need owned Strings because we'll move left_contents/right_contents later
+    #[cfg_attr(not(feature = "tree-sitter"), allow(unused_variables))]
+    let (old_text, new_text) = match (&left_contents, &right_contents) {
+        (
+            FileContents::Text { contents: old, .. },
+            FileContents::Text { contents: new, .. },
+        ) => (Some(old.clone()), Some(new.clone())),
+        _ => (None, None),
+    };
+
     if left_file_mode != right_file_mode {
         sections.push(Section::FileMode {
             is_checked: false,
@@ -132,7 +143,8 @@ pub fn create_file(
         }
     }
 
-    Ok(File {
+    #[cfg_attr(not(feature = "tree-sitter"), allow(unused_mut))]
+    let mut file = File {
         old_path: if left_display_path != right_display_path {
             Some(Cow::Owned(left_display_path))
         } else {
@@ -141,7 +153,38 @@ pub fn create_file(
         path: Cow::Owned(right_display_path),
         file_mode: left_file_mode,
         sections,
-    })
+        containers: None,
+    };
+
+    // Enhance with semantic containers if tree-sitter is enabled and both files are text
+    #[cfg(feature = "tree-sitter")]
+    if let (Some(ref old), Some(ref new)) = (old_text, new_text) {
+        use tracing::debug;
+        debug!("Attempting semantic enhancement for {:?}", file.path);
+        file = scm_record::semantic::try_add_semantic_containers(file, old, new);
+        if let Some(ref containers) = file.containers {
+            debug!("Successfully added {} semantic container(s) to {:?}:", containers.len(), file.path);
+            for container in containers {
+                match container {
+                    scm_record::SemanticContainer::Struct { name, fields, .. } => {
+                        debug!("  - Struct '{}' with {} field(s)", name, fields.len());
+                    }
+                    scm_record::SemanticContainer::Impl { type_name, trait_name, methods, .. } => {
+                        debug!("  - Impl{} '{}' with {} method(s)",
+                            trait_name.as_ref().map(|t| format!(" {}", t)).unwrap_or_default(),
+                            type_name, methods.len());
+                    }
+                    scm_record::SemanticContainer::Function { name, sections, .. } => {
+                        debug!("  - Function '{}' with {} section(s)", name, sections.len());
+                    }
+                }
+            }
+        } else {
+            debug!("No semantic containers extracted for {:?}", file.path);
+        }
+    }
+
+    Ok(file)
 }
 
 pub fn create_merge_file(
@@ -209,6 +252,7 @@ pub fn create_merge_file(
         path: Cow::Owned(output_path),
         file_mode: left_file_mode,
         sections,
+        containers: None,
     })
 }
 

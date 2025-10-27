@@ -16,8 +16,14 @@ mod util;
 
 pub mod consts;
 pub mod helpers;
+
+#[cfg(feature = "tree-sitter")]
+pub mod semantic;
 pub use types::{
     ChangeType, Commit, File, FileMode, RecordError, RecordState, Section, SectionChangedLine,
     SelectedChanges, SelectedContents, Tristate,
 };
+
+#[cfg(feature = "tree-sitter")]
+pub use types::{SemanticContainer, SemanticMember};
 pub use ui::{Event, RecordInput, Recorder, TerminalKind, TestingScreenshot};

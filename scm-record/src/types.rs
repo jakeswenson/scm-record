@@ -155,6 +155,86 @@ pub struct Commit {
     pub message: Option<String>,
 }
 
+/// A semantic container representing a code structure element (e.g., struct, impl, function).
+///
+/// Containers are the top-level organizational unit in semantic-first navigation,
+/// grouping related members and sections together based on the code's structure.
+#[cfg(feature = "tree-sitter")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum SemanticContainer<'a> {
+    /// A struct definition with its fields.
+    Struct {
+        /// The name of the struct
+        name: String,
+        /// The fields defined in this struct
+        fields: Vec<SemanticMember<'a>>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// An impl block (implementation) with its methods.
+    Impl {
+        /// The type being implemented (e.g., "Foo" for "impl Foo")
+        type_name: String,
+        /// The trait being implemented, if any (e.g., "Display" for "impl Display for Foo")
+        trait_name: Option<String>,
+        /// The methods defined in this impl block
+        methods: Vec<SemanticMember<'a>>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// A top-level function (not inside an impl block).
+    Function {
+        /// The name of the function
+        name: String,
+        /// The diff sections containing changes within this function
+        sections: Vec<Section<'a>>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+}
+
+/// A semantic member within a container (e.g., field, method).
+///
+/// Members represent individual elements within a semantic container,
+/// such as struct fields or impl methods.
+#[cfg(feature = "tree-sitter")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum SemanticMember<'a> {
+    /// A field within a struct.
+    Field {
+        /// The name of the field
+        name: String,
+        /// The diff sections containing changes to this field
+        sections: Vec<Section<'a>>,
+        /// Whether all changes to this field are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes to this field are selected
+        is_partial: bool,
+    },
+
+    /// A method within an impl block.
+    Method {
+        /// The name of the method
+        name: String,
+        /// The diff sections containing changes within this method
+        sections: Vec<Section<'a>>,
+        /// Whether all changes to this method are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes to this method are selected
+        is_partial: bool,
+    },
+}
+
 /// The state of a file to be recorded.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -175,7 +255,18 @@ pub struct File<'a> {
     pub file_mode: FileMode,
 
     /// The set of [`Section`]s inside the file.
+    ///
+    /// When semantic parsing is disabled or unavailable, this contains the
+    /// traditional diff-first sections.
     pub sections: Vec<Section<'a>>,
+
+    /// Semantic containers for this file (when tree-sitter parsing is enabled).
+    ///
+    /// When `Some`, the file uses semantic-first navigation where changes are
+    /// organized by code structure. When `None`, falls back to traditional
+    /// diff-first sectioning in the `sections` field.
+    #[cfg(feature = "tree-sitter")]
+    pub containers: Option<Vec<SemanticContainer<'a>>>,
 }
 
 /// The changes for a particular file selected as part of the record operation.
@@ -243,6 +334,7 @@ impl File<'_> {
             path: _,
             file_mode,
             sections,
+            ..
         } = self;
 
         let file_mode_section = sections.iter().find_map(|section| match section {
@@ -360,6 +452,7 @@ impl File<'_> {
             path: _,
             file_mode: _,
             sections,
+            ..
         } = self;
         let mut seen_value = None;
         for section in sections {
@@ -406,6 +499,7 @@ impl File<'_> {
             path: _,
             file_mode: _,
             sections,
+            ..
         } = self;
         for section in sections {
             section.set_checked(checked);
@@ -419,6 +513,7 @@ impl File<'_> {
             path: _,
             file_mode: _,
             sections,
+            ..
         } = self;
         for section in sections {
             section.toggle_all();

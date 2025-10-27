@@ -69,6 +69,10 @@ pub struct Opts {
     /// Write the resolved merge conflicts to this file.
     #[clap(short = 'o', long = "output", conflicts_with("dir_diff"))]
     pub output: Option<PathBuf>,
+
+    /// Enable verbose debug logging.
+    #[clap(short = 'v', long = "verbose")]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Error)]
@@ -343,6 +347,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             output: _,
             read_only: _,
             dry_run: _,
+            ..
         } => {
             let files = vec![render::create_file(
                 filesystem,
@@ -365,6 +370,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             output: _,
             read_only: _,
             dry_run: _,
+            ..
         } => {
             let display_paths = filesystem.read_dir_diff_paths(left, right)?;
             let mut files = Vec::new();
@@ -391,6 +397,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             output: Some(output),
             read_only: _,
             dry_run: _,
+            ..
         } => {
             let files = vec![render::create_merge_file(
                 filesystem,
@@ -413,6 +420,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             output: None,
             read_only: _,
             dry_run: _,
+            ..
         } => {
             unreachable!("--output is required when --base is provided");
         }
@@ -425,6 +433,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             output: _,
             read_only: _,
             dry_run: _,
+            ..
         } => {
             unimplemented!("--base cannot be used with --dir-diff");
         }
@@ -551,15 +560,34 @@ pub fn apply_changes(
 
 /// Select changes interactively and apply them to disk.
 pub fn run(opts: Opts) -> Result<()> {
+    use tracing::{debug, info};
+
+    debug!("Starting scm-diff-editor with opts: {:?}", opts);
+
+    // Check if we're running in a TTY
+    let is_stdin_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let is_stdout_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let is_stderr_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    debug!("TTY status: stdin={}, stdout={}, stderr={}", is_stdin_tty, is_stdout_tty, is_stderr_tty);
+
     let filesystem = RealFilesystem;
+    debug!("Processing filesystem options...");
     let DiffContext { files, write_root } = process_opts(&filesystem, &opts)?;
+    info!("Loaded {} file(s) for diffing", files.len());
+
     let state = RecordState {
         is_read_only: opts.read_only,
         commits: Default::default(),
         files,
     };
+
+    debug!("Initializing crossterm input reader...");
     let mut input = CrosstermInput;
+
+    debug!("Creating recorder...");
     let recorder = Recorder::new(state, &mut input);
+
+    debug!("Starting recorder UI...");
     match recorder.run() {
         Ok(state) => {
             if opts.dry_run {
@@ -716,6 +744,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
         assert_debug_snapshot!(files, @r###"
@@ -837,6 +866,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
 
@@ -900,6 +930,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
         assert_debug_snapshot!(files, @r###"
@@ -982,6 +1013,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         )?;
         assert_debug_snapshot!(files, @r###"
@@ -1062,6 +1094,7 @@ qux2
                 output: None,
                 read_only: false,
                 dry_run: false,
+                verbose: false,
             },
         );
         insta::assert_debug_snapshot!(result, @r###"
@@ -1246,6 +1279,7 @@ Hello world 4
                 dry_run: false,
                 base: Some("base".into()),
                 output: Some("output".into()),
+                verbose: false,
             },
         )?;
         insta::assert_debug_snapshot!(files, @r###"
@@ -1381,6 +1415,7 @@ Hello world 2
                 dry_run: false,
                 base: None,
                 output: None,
+                verbose: false,
             },
         )?;
         insta::assert_debug_snapshot!(files, @r###"

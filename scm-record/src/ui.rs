@@ -3738,6 +3738,8 @@ mod tests {
                 path: Cow::Borrowed(Path::new("foo/bar")),
                 file_mode: FileMode::FILE_DEFAULT,
                 sections: Default::default(),
+                #[cfg(feature = "tree-sitter")]
+                containers: None,
             }],
         };
         let mut input = TestingInput::new(80, 24, [Event::QuitAccept]);
