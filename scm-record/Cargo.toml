@@ -16,7 +16,7 @@ rust-version = "1.85"
 
 [features]
 debug = ["serde"]
-default = ["debug"]
+default = ["debug", "tree-sitter"]
 serde = ["dep:serde", "dep:serde_json"]
 tree-sitter = [
     "dep:tree-sitter",
