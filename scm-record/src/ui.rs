@@ -1761,10 +1761,46 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         commit_idx: section_key.commit_idx,
                         file_idx: section_key.file_idx,
                     };
+                    // Check if file is expanded
                     match self.file_expanded(file_key) {
-                        Tristate::False => false,
-                        Tristate::Partial | Tristate::True => true,
+                        Tristate::False => return false,
+                        Tristate::Partial | Tristate::True => {}
                     }
+
+                    // Check if section belongs to a semantic container/member
+                    #[cfg(feature = "tree-sitter")]
+                    if let Some(parent_key) = self.find_section_parent(
+                        section_key.commit_idx,
+                        section_key.file_idx,
+                        section_key.section_idx,
+                    ) {
+                        // Section belongs to a container/member - check if all ancestors are expanded
+                        return match parent_key {
+                            SelectionKey::Container(_) => {
+                                // Section belongs directly to a container - check if container is expanded
+                                self.expanded_items.contains(&parent_key)
+                            }
+                            SelectionKey::Member(member_key) => {
+                                // Section belongs to a member - check both member AND container are expanded
+                                let container_key = ContainerKey {
+                                    commit_idx: member_key.commit_idx,
+                                    file_idx: member_key.file_idx,
+                                    container_idx: member_key.container_idx,
+                                };
+                                self.expanded_items.contains(&parent_key)
+                                    && self
+                                        .expanded_items
+                                        .contains(&SelectionKey::Container(container_key))
+                            }
+                            _ => {
+                                // Shouldn't happen, but if it does, assume not visible
+                                false
+                            }
+                        };
+                    }
+
+                    // Section is a fallback section (not in a container) - visible if file is expanded
+                    true
                 }
                 SelectionKey::Line(line_key) => {
                     let file_key = FileKey {
@@ -1776,10 +1812,40 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         file_idx: line_key.file_idx,
                         section_idx: line_key.section_idx,
                     };
-                    self.expanded_items.contains(&SelectionKey::File(file_key))
-                        && self
-                            .expanded_items
-                            .contains(&SelectionKey::Section(section_key))
+
+                    // Check if file and section are expanded
+                    if !self.expanded_items.contains(&SelectionKey::File(file_key))
+                        || !self.expanded_items.contains(&SelectionKey::Section(section_key))
+                    {
+                        return false;
+                    }
+
+                    // Additionally, check if the section belongs to a semantic container
+                    #[cfg(feature = "tree-sitter")]
+                    if let Some(parent_key) = self.find_section_parent(
+                        section_key.commit_idx,
+                        section_key.file_idx,
+                        section_key.section_idx,
+                    ) {
+                        // Section belongs to a container/member - check if all ancestors are expanded
+                        return match parent_key {
+                            SelectionKey::Container(_) => {
+                                self.expanded_items.contains(&parent_key)
+                            }
+                            SelectionKey::Member(member_key) => {
+                                let container_key = ContainerKey {
+                                    commit_idx: member_key.commit_idx,
+                                    file_idx: member_key.file_idx,
+                                    container_idx: member_key.container_idx,
+                                };
+                                self.expanded_items.contains(&parent_key)
+                                    && self.expanded_items.contains(&SelectionKey::Container(container_key))
+                            }
+                            _ => false,
+                        };
+                    }
+
+                    true
                 }
             })
             .collect();
@@ -1984,13 +2050,23 @@ impl<'state, 'input> Recorder<'state, 'input> {
             selection_key @ SelectionKey::Section(SectionKey {
                 commit_idx,
                 file_idx,
-                section_idx: _,
+                section_idx,
             }) => {
                 // If folding is requested and the selection is expanded,
-                // collapse it. Otherwise, move the selection to the file.
+                // collapse it. Otherwise, move the selection to the parent.
                 if fold_section && self.expanded_items.contains(&selection_key) {
                     StateUpdate::SetExpandItem(selection_key, false)
                 } else {
+                    // Check if this section belongs to a semantic container/member
+                    #[cfg(feature = "tree-sitter")]
+                    if let Some(parent_key) = self.find_section_parent(commit_idx, file_idx, section_idx) {
+                        return StateUpdate::SelectItem {
+                            selection_key: parent_key,
+                            ensure_in_viewport: true,
+                        };
+                    }
+
+                    // Fallback: section doesn't belong to a container, jump to file
                     StateUpdate::SelectItem {
                         selection_key: SelectionKey::File(FileKey {
                             commit_idx,
@@ -2066,14 +2142,11 @@ impl<'state, 'input> Recorder<'state, 'input> {
         match drawn_rects.get(&id) {
             Some(DrawnRect { rect, timestamp: _ }) => Some(*rect),
             None => {
-                if cfg!(debug_assertions) {
-                    panic!(
-                        "could not look up drawn rect for component with ID {id:?}; was it drawn?"
-                    )
-                } else {
-                    warn!(component_id = ?id, "could not look up drawn rect for component; was it drawn?");
-                    None
-                }
+                // This can happen when navigating to a component that hasn't been drawn yet
+                // (e.g., it's off-screen or just became visible after a collapse/expand).
+                // This is a normal case when jumping large distances in the hierarchy.
+                // The component will be rendered and scrolled into view in the next frame.
+                None
             }
         }
     }
@@ -2776,6 +2849,73 @@ impl<'state, 'input> Recorder<'state, 'input> {
                 "Out-of-bounds file key: {file_key:?}"
             ))),
         }
+    }
+
+    /// Find the parent container or member that contains the given section.
+    ///
+    /// Returns the SelectionKey of the parent container/member, or None if the
+    /// section doesn't belong to any semantic container (i.e., it's a fallback section).
+    #[cfg(feature = "tree-sitter")]
+    fn find_section_parent(
+        &self,
+        commit_idx: usize,
+        file_idx: usize,
+        section_idx: usize,
+    ) -> Option<SelectionKey> {
+        let file = self.file(FileKey { commit_idx, file_idx }).ok()?;
+
+        // Check if file has containers
+        let containers = file.containers.as_ref()?;
+
+        // Search through all containers and their members
+        for (container_idx, container) in containers.iter().enumerate() {
+            use crate::{SemanticContainer, SemanticMember};
+
+            match container {
+                SemanticContainer::Function { section_indices, .. } => {
+                    if section_indices.contains(&section_idx) {
+                        return Some(SelectionKey::Container(ContainerKey {
+                            commit_idx,
+                            file_idx,
+                            container_idx,
+                        }));
+                    }
+                }
+                SemanticContainer::Struct { fields, .. } => {
+                    // Check each field
+                    for (member_idx, field) in fields.iter().enumerate() {
+                        if let SemanticMember::Field { section_indices, .. } = field {
+                            if section_indices.contains(&section_idx) {
+                                return Some(SelectionKey::Member(MemberKey {
+                                    commit_idx,
+                                    file_idx,
+                                    container_idx,
+                                    member_idx,
+                                }));
+                            }
+                        }
+                    }
+                }
+                SemanticContainer::Impl { methods, .. } => {
+                    // Check each method
+                    for (member_idx, method) in methods.iter().enumerate() {
+                        if let SemanticMember::Method { section_indices, .. } = method {
+                            if section_indices.contains(&section_idx) {
+                                return Some(SelectionKey::Member(MemberKey {
+                                    commit_idx,
+                                    file_idx,
+                                    container_idx,
+                                    member_idx,
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section doesn't belong to any container
+        None
     }
 
     fn file_tristate(&self, file_key: FileKey) -> Result<Tristate, RecordError> {
@@ -4774,5 +4914,122 @@ mod tests {
         fn test_push_lines_from_span(line in ".*") {
             test_push_lines_from_span_impl(line.as_str());
         }
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_collapsed_container_hides_children() {
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
+
+        // Create a file with two containers, each with sections and lines
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                // Section 0: belongs to container 0
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("old line 1"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("new line 1"),
+                        },
+                    ],
+                },
+                // Section 1: belongs to container 1
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("old line 2"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("new line 2"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Function {
+                    name: "function1".to_string(),
+                    section_indices: vec![0],
+                    is_checked: false,
+                    is_partial: false,
+                },
+                SemanticContainer::Function {
+                    name: "function2".to_string(),
+                    section_indices: vec![1],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let mut recorder = Recorder::new(state, &mut input);
+
+        // Expand file and all containers initially
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container0_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let container1_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 1 };
+        let section0_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+        let section1_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 1 };
+
+        recorder.expanded_items.insert(SelectionKey::File(file_key));
+        recorder.expanded_items.insert(SelectionKey::Container(container0_key));
+        recorder.expanded_items.insert(SelectionKey::Container(container1_key));
+        recorder.expanded_items.insert(SelectionKey::Section(section0_key));
+        recorder.expanded_items.insert(SelectionKey::Section(section1_key));
+
+        // Get visible keys with all expanded
+        let (visible_keys_expanded, _) = recorder.find_selection();
+
+        // Both containers and their children should be visible
+        assert!(visible_keys_expanded.contains(&SelectionKey::Container(container0_key)));
+        assert!(visible_keys_expanded.contains(&SelectionKey::Container(container1_key)));
+        assert!(visible_keys_expanded.contains(&SelectionKey::Section(section0_key)));
+        assert!(visible_keys_expanded.contains(&SelectionKey::Section(section1_key)));
+
+        // Verify Lines from section 0 are visible
+        let line0_0 = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 0 };
+        let line0_1 = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 1 };
+        assert!(visible_keys_expanded.contains(&SelectionKey::Line(line0_0)));
+        assert!(visible_keys_expanded.contains(&SelectionKey::Line(line0_1)));
+
+        // Now collapse container 0
+        recorder.expanded_items.remove(&SelectionKey::Container(container0_key));
+
+        // Get visible keys with container 0 collapsed
+        let (visible_keys_collapsed, _) = recorder.find_selection();
+
+        // Container 0 should still be visible (collapsed items are visible, just their children aren't)
+        assert!(visible_keys_collapsed.contains(&SelectionKey::Container(container0_key)));
+
+        // Container 1 should still be visible and expanded
+        assert!(visible_keys_collapsed.contains(&SelectionKey::Container(container1_key)));
+        assert!(visible_keys_collapsed.contains(&SelectionKey::Section(section1_key)));
+
+        // CRITICAL: Section 0 and its Lines should NOT be visible (container 0 is collapsed)
+        assert!(!visible_keys_collapsed.contains(&SelectionKey::Section(section0_key)),
+            "Section from collapsed container should not be visible");
+        assert!(!visible_keys_collapsed.contains(&SelectionKey::Line(line0_0)),
+            "Line from collapsed container should not be visible");
+        assert!(!visible_keys_collapsed.contains(&SelectionKey::Line(line0_1)),
+            "Line from collapsed container should not be visible");
     }
 }

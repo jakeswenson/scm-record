@@ -402,6 +402,45 @@ We will:
 - **Top-level functions**: Each function is its own **container**
 - **Top-level non-functional code**: Imports, constants, type aliases fall back to diff-first sectioning
 
+**Trivia Inclusion Strategy:**
+
+To provide better grouping and prevent changes from being split across multiple containers, semantic ranges are **expanded to include leading trivia**:
+
+- **Attributes**: All `#[...]` attributes are included in the container/member range
+  - Example: `#[test]`, `#[cfg(test)]`, `#[derive(Debug)]`
+- **Doc Comments**: Documentation comments (`///`, `//!`) are included if adjacent (within 1 line)
+- **Regular Comments**: Line comments (`//`) are included if adjacent (within 1 line)
+- **Members**: Fields and methods also have their attributes and comments included
+
+**Rationale:**
+- Attributes and doc comments are semantically part of the declaration they annotate
+- Users typically want to commit the function AND its attributes/docs together
+- Prevents fragmentation when only the attribute changes (e.g., adding `#[test]`)
+- Maintains cohesion of semantic units
+
+**Example:**
+```rust
+// This comment is included
+/// Doc comment for the function
+#[test]
+#[cfg(test)]
+fn test_something() {
+    assert!(true);
+}
+```
+
+All of the above (comment, doc comment, attributes, and function body) are grouped as a single semantic container.
+
+**Context Preservation:**
+
+In addition to trivia, **all sections (including Unchanged context) are preserved** within containers:
+
+- **Section storage**: Containers store indices to ALL sections that fall within their line range
+- **Filtering logic**: Only containers with at least one editable section are displayed
+- **Context display**: Unchanged sections provide context around changes within a container
+
+This ensures users see proper before/after context when viewing changes within a semantic container, matching the familiar diff experience.
+
 **Matching Strategy:**
 - **Initial implementation**: Name-based matching
   - `struct Foo` matches by name "Foo"

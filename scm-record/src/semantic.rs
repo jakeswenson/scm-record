@@ -269,11 +269,13 @@ pub fn extract_struct_fields(
                         .unwrap_or("<unknown>")
                         .to_string();
 
+                    let (start_line, end_line) = expand_range_for_attributes_and_comments(field, field_list);
+
                     fields.push(RustMember {
                         kind: RustMemberKind::Field,
                         name,
-                        start_line: field.start_position().row,
-                        end_line: field.end_position().row,
+                        start_line,
+                        end_line,
                     });
                 }
             }
@@ -302,11 +304,13 @@ pub fn extract_impl_methods(
                         .unwrap_or("<unknown>")
                         .to_string();
 
+                    let (start_line, end_line) = expand_range_for_attributes_and_comments(item, decl_list);
+
                     methods.push(RustMember {
                         kind: RustMemberKind::Method,
                         name,
-                        start_line: item.start_position().row,
-                        end_line: item.end_position().row,
+                        start_line,
+                        end_line,
                     });
                 }
             }
@@ -316,7 +320,54 @@ pub fn extract_impl_methods(
     methods
 }
 
+/// Expands a node's line range to include preceding attributes, comments, and whitespace.
+///
+/// This ensures that when we group sections by semantic structure, we include the full
+/// declaration including doc comments, attributes, and surrounding whitespace.
+#[cfg(feature = "tree-sitter")]
+fn expand_range_for_attributes_and_comments(
+    node: tree_sitter::Node,
+    parent: tree_sitter::Node,
+) -> (usize, usize) {
+    let mut start_line = node.start_position().row;
+    let end_line = node.end_position().row;
+
+    // Walk backwards through siblings to find attributes and comments
+    let mut cursor = parent.walk();
+    let siblings: Vec<_> = parent.children(&mut cursor).collect();
+
+    if let Some(node_index) = siblings.iter().position(|n| n.id() == node.id()) {
+        // Look at all previous siblings in reverse order
+        for sibling in siblings[..node_index].iter().rev() {
+            match sibling.kind() {
+                // Include attribute items like #[test], #[cfg(...)]
+                "attribute_item" => {
+                    start_line = start_line.min(sibling.start_position().row);
+                }
+                // Include doc comments ///
+                "line_comment" => {
+                    let sibling_line = sibling.start_position().row;
+                    // Only include if it's adjacent or within 1 line
+                    if start_line.saturating_sub(sibling_line) <= 1 {
+                        start_line = sibling_line;
+                    } else {
+                        break; // Stop if there's a gap
+                    }
+                }
+                // Stop at non-comment/non-attribute siblings
+                _ if !sibling.kind().is_empty() => break,
+                _ => {}
+            }
+        }
+    }
+
+    (start_line, end_line)
+}
+
 /// Extract containers with their members from a parsed Rust file.
+///
+/// Returns a vector of containers (structs, impls, functions) with their associated
+/// members (fields, methods). Line ranges are expanded to include attributes and comments.
 #[cfg(feature = "tree-sitter")]
 pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustContainerWithMembers> {
     let mut containers = Vec::new();
@@ -334,13 +385,14 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
                         .to_string();
 
                     let fields = extract_struct_fields(child, source_bytes);
+                    let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
 
                     containers.push(RustContainerWithMembers {
                         container: RustContainer {
                             kind: RustContainerKind::Struct,
                             name,
-                            start_line: child.start_position().row,
-                            end_line: child.end_position().row,
+                            start_line,
+                            end_line,
                         },
                         members: fields,
                     });
@@ -361,13 +413,14 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
                     });
 
                     let methods = extract_impl_methods(child, source_bytes);
+                    let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
 
                     containers.push(RustContainerWithMembers {
                         container: RustContainer {
                             kind: RustContainerKind::Impl { trait_name },
                             name: type_name,
-                            start_line: child.start_position().row,
-                            end_line: child.end_position().row,
+                            start_line,
+                            end_line,
                         },
                         members: methods,
                     });
@@ -380,12 +433,14 @@ pub fn extract_rust_containers_with_members(parsed: &ParsedFile) -> Vec<RustCont
                         .unwrap_or("<unknown>")
                         .to_string();
 
+                    let (start_line, end_line) = expand_range_for_attributes_and_comments(child, root_node);
+
                     containers.push(RustContainerWithMembers {
                         container: RustContainer {
                             kind: RustContainerKind::Function,
                             name,
-                            start_line: child.start_position().row,
-                            end_line: child.end_position().row,
+                            start_line,
+                            end_line,
                         },
                         members: Vec::new(), // Functions don't have members
                     });
@@ -667,20 +722,6 @@ pub fn try_add_semantic_containers<'a>(
         })
     };
 
-    // Helper to filter only editable sections
-    let filter_editable_sections = |indices: &[usize]| -> Vec<usize> {
-        indices
-            .iter()
-            .copied()
-            .filter(|&idx| {
-                file.sections
-                    .get(idx)
-                    .map(|s| s.is_editable())
-                    .unwrap_or(false)
-            })
-            .collect()
-    };
-
     // Now build semantic containers using the pre-computed section assignments
     let semantic_containers: Vec<SemanticContainer> = containers_with_members
         .into_iter()
@@ -702,17 +743,15 @@ pub fn try_add_semantic_containers<'a>(
                                 .map(|(_, _, indices)| indices.clone())
                                 .unwrap_or_default();
 
-                            // Filter to only editable sections
-                            let editable_section_indices = filter_editable_sections(&section_indices);
-
                             // Filter out members with no editable changes
-                            if editable_section_indices.is_empty() {
+                            if !has_editable_sections(&section_indices) {
                                 return None;
                             }
 
+                            // Keep ALL sections (including context) for display
                             Some(SemanticMember::Field {
                                 name: m.name,
-                                section_indices: editable_section_indices,
+                                section_indices,
                                 is_checked: false,
                                 is_partial: false,
                             })
@@ -744,17 +783,15 @@ pub fn try_add_semantic_containers<'a>(
                                 .map(|(_, _, indices)| indices.clone())
                                 .unwrap_or_default();
 
-                            // Filter to only editable sections
-                            let editable_section_indices = filter_editable_sections(&section_indices);
-
                             // Filter out methods with no editable changes
-                            if editable_section_indices.is_empty() {
+                            if !has_editable_sections(&section_indices) {
                                 return None;
                             }
 
+                            // Keep ALL sections (including context) for display
                             Some(SemanticMember::Method {
                                 name: m.name,
-                                section_indices: editable_section_indices,
+                                section_indices,
                                 is_checked: false,
                                 is_partial: false,
                             })
@@ -781,17 +818,15 @@ pub fn try_add_semantic_containers<'a>(
                         .map(|(_, _, indices)| indices.clone())
                         .unwrap_or_default();
 
-                    // Filter to only editable sections
-                    let editable_section_indices = filter_editable_sections(&section_indices);
-
                     // Filter out functions with no editable changes
-                    if editable_section_indices.is_empty() {
+                    if !has_editable_sections(&section_indices) {
                         return None;
                     }
 
+                    // Keep ALL sections (including context) for display
                     SemanticContainer::Function {
                         name: container.name,
-                        section_indices: editable_section_indices,
+                        section_indices,
                         is_checked: false,
                         is_partial: false,
                     }
@@ -1279,8 +1314,10 @@ fn world() {
                 is_partial: _,
             } => {
                 assert_eq!(name, "hello");
-                assert_eq!(section_indices.len(), 1); // Only the Changed section
-                assert_eq!(section_indices[0], 1); // Points to the Changed section at index 1
+                // Should have sections that fall within the function's line range
+                assert!(!section_indices.is_empty());
+                // At minimum, should have the Changed section
+                assert!(section_indices.contains(&1));
             }
             _ => panic!("Expected Function container"),
         }
@@ -1575,9 +1612,11 @@ fn modified_function() {
         match &containers[0] {
             crate::SemanticContainer::Function { name, section_indices, .. } => {
                 assert_eq!(name, "modified_function");
-                // Should have 1 editable section (the Changed section at index 1)
-                assert_eq!(section_indices.len(), 1);
-                assert_eq!(section_indices[0], 1);
+                // Should have sections that fall within the function's line range
+                // With context preservation, this includes both changed and unchanged sections
+                assert!(!section_indices.is_empty());
+                // At minimum, should have the Changed section
+                assert!(section_indices.contains(&1));
             }
             _ => panic!("Expected Function container"),
         }
@@ -1704,8 +1743,10 @@ impl MyStruct {
                 match &methods[0] {
                     crate::SemanticMember::Method { name, section_indices, .. } => {
                         assert_eq!(name, "changed_method");
-                        assert_eq!(section_indices.len(), 1);
-                        assert_eq!(section_indices[0], 1); // Points to the Changed section
+                        // Should have sections within the method's line range
+                        assert!(!section_indices.is_empty());
+                        // At minimum, should have the Changed section
+                        assert!(section_indices.contains(&1));
                     }
                     _ => panic!("Expected Method member"),
                 }
