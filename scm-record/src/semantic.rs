@@ -1257,10 +1257,10 @@ pub fn try_add_semantic_containers<'a>(
 
     // Extract containers with members from the new version (language-specific)
     let containers_with_members = match language {
-        SupportedLanguage::Rust => extract_rust_containers_with_members(&new_parsed),
-        SupportedLanguage::Python => extract_python_containers_with_members(&new_parsed),
-        SupportedLanguage::Kotlin => extract_kotlin_containers_with_members(&new_parsed),
-        SupportedLanguage::Java => extract_java_containers_with_members(&new_parsed),
+        SupportedLanguage::Rust => rust::extract_containers_with_members(&new_parsed),
+        SupportedLanguage::Python => python::extract_containers_with_members(&new_parsed),
+        SupportedLanguage::Kotlin => kotlin::extract_containers_with_members(&new_parsed),
+        SupportedLanguage::Java => java::extract_containers_with_members(&new_parsed),
         // Other languages not yet implemented (HCL, Markdown, YAML)
         _ => return file,
     };
@@ -1439,18 +1439,12 @@ pub fn try_add_semantic_containers<'a>(
     file
 }
 
-// Test modules using flat module structure
-#[cfg(test)]
-mod tests_common;
-
-#[cfg(test)]
-mod tests_rust;
-
-#[cfg(test)]
-mod tests_python;
-
-#[cfg(test)]
-mod tests_kotlin;
-
-#[cfg(test)]
-mod tests_java;
+// Language-specific modules
+#[cfg(feature = "tree-sitter")]
+pub mod rust;
+#[cfg(feature = "tree-sitter")]
+pub mod python;
+#[cfg(feature = "tree-sitter")]
+pub mod kotlin;
+#[cfg(feature = "tree-sitter")]
+pub mod java;
