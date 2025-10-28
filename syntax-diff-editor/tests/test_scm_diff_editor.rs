@@ -3,43 +3,43 @@ use std::path::PathBuf;
 use insta::assert_debug_snapshot;
 use maplit::btreemap;
 
+use scm_record::{RecordState, Section};
 use syntax_diff_editor::testing::{file_info, select_all, TestFilesystem};
 use syntax_diff_editor::{apply_changes, process_opts, DiffContext, Opts, Result};
-use scm_record::{RecordState, Section};
 
 #[test]
 fn test_diff() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left") => file_info("\
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left") => file_info("\
 foo
 common1
 common2
 bar
 "),
-        PathBuf::from("right") => file_info("\
+      PathBuf::from("right") => file_info("\
 qux1
 common1
 common2
 qux2
 "),
-    });
-    let DiffContext {
-        mut files,
-        write_root,
-    } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left"),
-            right: PathBuf::from("right"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
-    assert_debug_snapshot!(files, @r###"
+  });
+  let DiffContext {
+    mut files,
+    write_root,
+  } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left"),
+      right: PathBuf::from("right"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
+  assert_debug_snapshot!(files, @r###"
     [
         File {
             old_path: Some(
@@ -90,17 +90,17 @@ qux2
     ]
     "###);
 
-    select_all(&mut files);
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  select_all(&mut files);
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "left": FileInfo {
@@ -130,49 +130,49 @@ qux2
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_diff_no_changes() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left") => file_info("\
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left") => file_info("\
 foo
 common1
 common2
 bar
 "),
-        PathBuf::from("right") => file_info("\
+      PathBuf::from("right") => file_info("\
 qux1
 common1
 common2
 qux2
 "),
-    });
-    let DiffContext { files, write_root } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left"),
-            right: PathBuf::from("right"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
+  });
+  let DiffContext { files, write_root } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left"),
+      right: PathBuf::from("right"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
 
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "left": FileInfo {
@@ -202,31 +202,31 @@ qux2
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_diff_absent_left() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("right") => file_info("right\n"),
-    });
-    let DiffContext {
-        mut files,
-        write_root,
-    } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left"),
-            right: PathBuf::from("right"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
-    assert_debug_snapshot!(files, @r###"
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("right") => file_info("right\n"),
+  });
+  let DiffContext {
+    mut files,
+    write_root,
+  } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left"),
+      right: PathBuf::from("right"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
+  assert_debug_snapshot!(files, @r###"
     [
         File {
             old_path: Some(
@@ -256,17 +256,17 @@ fn test_diff_absent_left() -> Result<()> {
     ]
     "###);
 
-    select_all(&mut files);
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  select_all(&mut files);
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "right": FileInfo {
@@ -286,31 +286,31 @@ fn test_diff_absent_left() -> Result<()> {
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_diff_absent_right() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left") => file_info("left\n"),
-    });
-    let DiffContext {
-        mut files,
-        write_root,
-    } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left"),
-            right: PathBuf::from("right"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
-    assert_debug_snapshot!(files, @r###"
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left") => file_info("left\n"),
+  });
+  let DiffContext {
+    mut files,
+    write_root,
+  } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left"),
+      right: PathBuf::from("right"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
+  assert_debug_snapshot!(files, @r###"
     [
         File {
             old_path: Some(
@@ -340,17 +340,17 @@ fn test_diff_absent_right() -> Result<()> {
     ]
     "###);
 
-    select_all(&mut files);
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  select_all(&mut files);
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "left": FileInfo {
@@ -370,29 +370,29 @@ fn test_diff_absent_right() -> Result<()> {
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_reject_diff_non_files() -> Result<()> {
-    let filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left/foo") => file_info("left\n"),
-        PathBuf::from("right/foo") => file_info("right\n"),
-    });
-    let result = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left"),
-            right: PathBuf::from("right"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    );
-    insta::assert_debug_snapshot!(result, @r###"
+  let filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left/foo") => file_info("left\n"),
+      PathBuf::from("right/foo") => file_info("right\n"),
+  });
+  let result = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left"),
+      right: PathBuf::from("right"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  );
+  insta::assert_debug_snapshot!(result, @r###"
         Err(
             ReadFile {
                 path: "left",
@@ -404,40 +404,40 @@ fn test_reject_diff_non_files() -> Result<()> {
         )
         "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_diff_files_in_subdirectories() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left/foo") => file_info("left contents\n"),
-        PathBuf::from("right/foo") => file_info("right contents\n"),
-    });
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left/foo") => file_info("left contents\n"),
+      PathBuf::from("right/foo") => file_info("right contents\n"),
+  });
 
-    let DiffContext { files, write_root } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left/foo"),
-            right: PathBuf::from("right/foo"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
+  let DiffContext { files, write_root } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left/foo"),
+      right: PathBuf::from("right/foo"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
 
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    assert_debug_snapshot!(filesystem, @r###"
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "left/foo": FileInfo {
@@ -469,40 +469,40 @@ fn test_diff_files_in_subdirectories() -> Result<()> {
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_dir_diff_no_changes() -> Result<()> {
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("left/foo") => file_info("left contents\n"),
-        PathBuf::from("right/foo") => file_info("right contents\n"),
-    });
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("left/foo") => file_info("left contents\n"),
+      PathBuf::from("right/foo") => file_info("right contents\n"),
+  });
 
-    let DiffContext { files, write_root } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: PathBuf::from("left/foo"),
-            right: PathBuf::from("right/foo"),
-            base: None,
-            output: None,
-            read_only: false,
-            dry_run: false,
-        },
-    )?;
+  let DiffContext { files, write_root } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: PathBuf::from("left/foo"),
+      right: PathBuf::from("right/foo"),
+      base: None,
+      output: None,
+      read_only: false,
+      dry_run: false,
+    },
+  )?;
 
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
-    assert_debug_snapshot!(filesystem, @r###"
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
+  assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "left/foo": FileInfo {
@@ -534,52 +534,52 @@ fn test_dir_diff_no_changes() -> Result<()> {
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_create_merge() -> Result<()> {
-    let base_contents = "\
+  let base_contents = "\
 Hello world 1
 Hello world 2
 Hello world 3
 Hello world 4
 ";
-    let left_contents = "\
+  let left_contents = "\
 Hello world 1
 Hello world 2
 Hello world L
 Hello world 4
 ";
-    let right_contents = "\
+  let right_contents = "\
 Hello world 1
 Hello world 2
 Hello world R
 Hello world 4
 ";
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("base") => file_info(base_contents),
-        PathBuf::from("left") => file_info(left_contents),
-        PathBuf::from("right") => file_info(right_contents),
-    });
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("base") => file_info(base_contents),
+      PathBuf::from("left") => file_info(left_contents),
+      PathBuf::from("right") => file_info(right_contents),
+  });
 
-    let DiffContext {
-        mut files,
-        write_root,
-    } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: "left".into(),
-            right: "right".into(),
-            read_only: false,
-            dry_run: false,
-            base: Some("base".into()),
-            output: Some("output".into()),
-        },
-    )?;
-    insta::assert_debug_snapshot!(files, @r###"
+  let DiffContext {
+    mut files,
+    write_root,
+  } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: "left".into(),
+      right: "right".into(),
+      read_only: false,
+      dry_run: false,
+      base: Some("base".into()),
+      output: Some("output".into()),
+    },
+  )?;
+  insta::assert_debug_snapshot!(files, @r###"
     [
         File {
             old_path: Some(
@@ -626,18 +626,18 @@ Hello world 4
     ]
     "###);
 
-    select_all(&mut files);
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files,
-        },
-    )?;
+  select_all(&mut files);
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files,
+    },
+  )?;
 
-    assert_debug_snapshot!(filesystem, @r###"
+  assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "base": FileInfo {
@@ -687,36 +687,36 @@ Hello world 4
     }
     "###);
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
 fn test_new_file() -> Result<()> {
-    let new_file_contents = "\
+  let new_file_contents = "\
 Hello world 1
 Hello world 2
 ";
-    let mut filesystem = TestFilesystem::new(btreemap! {
-        PathBuf::from("right") => file_info(new_file_contents),
-    });
+  let mut filesystem = TestFilesystem::new(btreemap! {
+      PathBuf::from("right") => file_info(new_file_contents),
+  });
 
-    let DiffContext {
-        mut files,
-        write_root,
-    } = process_opts(
-        &filesystem,
-        &Opts {
-            verbose: false,
-            dir_diff: false,
-            left: "left".into(),
-            right: "right".into(),
-            read_only: false,
-            dry_run: false,
-            base: None,
-            output: None,
-        },
-    )?;
-    insta::assert_debug_snapshot!(files, @r###"
+  let DiffContext {
+    mut files,
+    write_root,
+  } = process_opts(
+    &filesystem,
+    &Opts {
+      verbose: false,
+      dir_diff: false,
+      left: "left".into(),
+      right: "right".into(),
+      read_only: false,
+      dry_run: false,
+      base: None,
+      output: None,
+    },
+  )?;
+  insta::assert_debug_snapshot!(files, @r###"
     [
         File {
             old_path: Some(
@@ -751,17 +751,17 @@ Hello world 2
     ]
     "###);
 
-    // Select no changes from new file.
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files: files.clone(),
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  // Select no changes from new file.
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files: files.clone(),
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {},
         dirs: {
@@ -770,18 +770,18 @@ Hello world 2
     }
     "###);
 
-    // Select all changes from new file.
-    select_all(&mut files);
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files: files.clone(),
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  // Select all changes from new file.
+  select_all(&mut files);
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files: files.clone(),
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "right": FileInfo {
@@ -801,21 +801,21 @@ Hello world 2
     }
     "###);
 
-    // Select only some changes from new file.
-    match files[0].sections.get_mut(1).unwrap() {
-        Section::Changed { ref mut lines } => lines[0].is_checked = false,
-        _ => panic!("Expected changed section"),
-    }
-    apply_changes(
-        &mut filesystem,
-        &write_root,
-        RecordState {
-            is_read_only: false,
-            commits: Default::default(),
-            files: files.clone(),
-        },
-    )?;
-    insta::assert_debug_snapshot!(filesystem, @r###"
+  // Select only some changes from new file.
+  match files[0].sections.get_mut(1).unwrap() {
+    Section::Changed { ref mut lines } => lines[0].is_checked = false,
+    _ => panic!("Expected changed section"),
+  }
+  apply_changes(
+    &mut filesystem,
+    &write_root,
+    RecordState {
+      is_read_only: false,
+      commits: Default::default(),
+      files: files.clone(),
+    },
+  )?;
+  insta::assert_debug_snapshot!(filesystem, @r###"
     TestFilesystem {
         files: {
             "right": FileInfo {
@@ -835,5 +835,5 @@ Hello world 2
     }
     "###);
 
-    Ok(())
+  Ok(())
 }

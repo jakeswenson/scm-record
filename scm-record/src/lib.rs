@@ -2,10 +2,10 @@
 
 #![warn(missing_docs)]
 #![warn(
-    clippy::all,
-    clippy::as_conversions,
-    clippy::clone_on_ref_ptr,
-    clippy::dbg_macro
+  clippy::all,
+  clippy::as_conversions,
+  clippy::clone_on_ref_ptr,
+  clippy::dbg_macro
 )]
 #![allow(clippy::too_many_arguments)]
 
@@ -20,8 +20,8 @@ pub mod helpers;
 #[cfg(feature = "tree-sitter")]
 pub mod semantic;
 pub use types::{
-    ChangeType, Commit, File, FileMode, RecordError, RecordState, Section, SectionChangedLine,
-    SelectedChanges, SelectedContents, Tristate,
+  ChangeType, Commit, File, FileMode, RecordError, RecordState, Section, SectionChangedLine,
+  SelectedChanges, SelectedContents, Tristate,
 };
 
 #[cfg(feature = "tree-sitter")]
