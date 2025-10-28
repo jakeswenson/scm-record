@@ -1255,6 +1255,11 @@ pub fn try_add_semantic_containers<'a>(
         Err(_) => return file, // Parse failed, fall back
     };
 
+    // TODO: Implement rename detection by matching containers between old_parsed and new_parsed.
+    // This would allow us to detect when a function/class/etc. is renamed and show it as a
+    // modification rather than a deletion + addition. Matching could use similarity metrics
+    // on container structure, member names, and/or content.
+
     // Extract containers with members from the new version (language-specific)
     let containers_with_members = match language {
         SupportedLanguage::Rust => rust::extract_containers_with_members(&new_parsed),
@@ -1421,9 +1426,176 @@ pub fn try_add_semantic_containers<'a>(
                         is_partial: false,
                     }
                 }
-                // Other container kinds not yet implemented (Kotlin, Java, Python, HCL, Markdown, YAML)
-                _ => {
-                    // TODO: Implement extraction for other container kinds
+                ContainerKind::Class => {
+                    let members: Vec<_> = members
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(member_idx, m)| {
+                            let section_indices = section_assignments
+                                .iter()
+                                .find(|(c_idx, m_idx, _)| {
+                                    *c_idx == container_idx && *m_idx == Some(member_idx)
+                                })
+                                .map(|(_, _, indices)| indices.clone())
+                                .unwrap_or_default();
+
+                            // Filter out members with no editable changes
+                            if !has_editable_sections(&section_indices) {
+                                return None;
+                            }
+
+                            // Determine member type based on MemberKind
+                            match m.kind {
+                                MemberKind::Field | MemberKind::Property => Some(SemanticMember::Field {
+                                    name: m.name,
+                                    section_indices,
+                                    is_checked: false,
+                                    is_partial: false,
+                                }),
+                                MemberKind::Method => Some(SemanticMember::Method {
+                                    name: m.name,
+                                    section_indices,
+                                    is_checked: false,
+                                    is_partial: false,
+                                }),
+                            }
+                        })
+                        .collect();
+
+                    // Filter out classes with no members that have changes
+                    if members.is_empty() {
+                        return None;
+                    }
+
+                    SemanticContainer::Class {
+                        name: container.name,
+                        members,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                ContainerKind::Interface => {
+                    let methods: Vec<_> = members
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(member_idx, m)| {
+                            let section_indices = section_assignments
+                                .iter()
+                                .find(|(c_idx, m_idx, _)| {
+                                    *c_idx == container_idx && *m_idx == Some(member_idx)
+                                })
+                                .map(|(_, _, indices)| indices.clone())
+                                .unwrap_or_default();
+
+                            // Filter out methods with no editable changes
+                            if !has_editable_sections(&section_indices) {
+                                return None;
+                            }
+
+                            Some(SemanticMember::Method {
+                                name: m.name,
+                                section_indices,
+                                is_checked: false,
+                                is_partial: false,
+                            })
+                        })
+                        .collect();
+
+                    // Filter out interfaces with no methods that have changes
+                    if methods.is_empty() {
+                        return None;
+                    }
+
+                    SemanticContainer::Interface {
+                        name: container.name,
+                        methods,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                ContainerKind::Enum => {
+                    let section_indices = section_assignments
+                        .iter()
+                        .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
+                        .map(|(_, _, indices)| indices.clone())
+                        .unwrap_or_default();
+
+                    // Filter out enums with no editable changes
+                    if !has_editable_sections(&section_indices) {
+                        return None;
+                    }
+
+                    SemanticContainer::Enum {
+                        name: container.name,
+                        section_indices,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                ContainerKind::Object => {
+                    let section_indices = section_assignments
+                        .iter()
+                        .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
+                        .map(|(_, _, indices)| indices.clone())
+                        .unwrap_or_default();
+
+                    // Filter out objects with no editable changes
+                    if !has_editable_sections(&section_indices) {
+                        return None;
+                    }
+
+                    SemanticContainer::Object {
+                        name: container.name,
+                        section_indices,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                ContainerKind::Module => {
+                    let section_indices = section_assignments
+                        .iter()
+                        .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
+                        .map(|(_, _, indices)| indices.clone())
+                        .unwrap_or_default();
+
+                    // Filter out modules with no editable changes
+                    if !has_editable_sections(&section_indices) {
+                        return None;
+                    }
+
+                    SemanticContainer::Module {
+                        name: container.name,
+                        section_indices,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                ContainerKind::Section { level } => {
+                    let section_indices = section_assignments
+                        .iter()
+                        .find(|(c_idx, m_idx, _)| *c_idx == container_idx && m_idx.is_none())
+                        .map(|(_, _, indices)| indices.clone())
+                        .unwrap_or_default();
+
+                    // Filter out sections with no editable changes
+                    if !has_editable_sections(&section_indices) {
+                        return None;
+                    }
+
+                    SemanticContainer::Section {
+                        name: container.name,
+                        level,
+                        section_indices,
+                        is_checked: false,
+                        is_partial: false,
+                    }
+                }
+                // HCL and YAML container kinds not yet supported in UI
+                ContainerKind::Resource { .. }
+                | ContainerKind::DataSource { .. }
+                | ContainerKind::Variable
+                | ContainerKind::Output => {
+                    // TODO: Implement UI display for HCL/YAML container kinds
                     return None;
                 }
             };

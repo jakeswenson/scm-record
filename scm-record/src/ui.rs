@@ -986,8 +986,32 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     );
                                     (member_views, Vec::new())
                                 }
-                                crate::SemanticContainer::Function { section_indices, .. } => {
-                                    // Functions have sections directly, no members
+                                crate::SemanticContainer::Class { members, .. } => {
+                                    let member_views = self.make_member_views(
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        members,
+                                        is_read_only,
+                                    );
+                                    (member_views, Vec::new())
+                                }
+                                crate::SemanticContainer::Interface { methods, .. } => {
+                                    let member_views = self.make_member_views(
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        methods,
+                                        is_read_only,
+                                    );
+                                    (member_views, Vec::new())
+                                }
+                                crate::SemanticContainer::Function { section_indices, .. }
+                                | crate::SemanticContainer::Enum { section_indices, .. }
+                                | crate::SemanticContainer::Object { section_indices, .. }
+                                | crate::SemanticContainer::Module { section_indices, .. }
+                                | crate::SemanticContainer::Section { section_indices, .. } => {
+                                    // These containers have sections directly, no members
                                     let section_views = self.make_section_views_for_indices(
                                         commit_idx,
                                         file_idx,
@@ -1252,14 +1276,14 @@ impl<'state, 'input> Recorder<'state, 'input> {
         let mut line_num = 1;
         let mut editable_section_num = 0;
 
-        section_indices
+        let views: Vec<_> = section_indices
             .iter()
             .filter_map(|&section_idx| {
                 let section = file.sections.get(section_idx)?;
                 let section_key = SectionKey {
                     commit_idx,
                     file_idx,
-                    section_idx,  // Now this is the correct file.sections index!
+                    section_idx,
                 };
                 Some((section_idx, section, section_key))
             })
@@ -1351,7 +1375,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
 
                 section_view
             })
-            .collect()
+            .collect();
+
+        views
     }
 
     fn handle_event(
@@ -1514,6 +1540,39 @@ impl<'state, 'input> Recorder<'state, 'input> {
             }
             (None, Event::FocusOuter { fold_section }) => self.select_outer(fold_section),
             (None, Event::FocusInner) => {
+                // If currently on a collapsed container, expand it first
+                match self.selection_key {
+                    SelectionKey::Container(container_key) => {
+                        if !self.expanded_items.contains(&SelectionKey::Container(container_key)) {
+                            // Container is collapsed, expand it
+                            return Ok(StateUpdate::ToggleExpandItem(self.selection_key));
+                        }
+                        // Container is already expanded, proceed to select child
+                    }
+                    SelectionKey::Member(member_key) => {
+                        if !self.expanded_items.contains(&SelectionKey::Member(member_key)) {
+                            // Member is collapsed, expand it
+                            return Ok(StateUpdate::ToggleExpandItem(self.selection_key));
+                        }
+                        // Member is already expanded, proceed to select child
+                    }
+                    SelectionKey::Section(section_key) => {
+                        if !self.expanded_items.contains(&SelectionKey::Section(section_key)) {
+                            // Section is collapsed, expand it
+                            return Ok(StateUpdate::ToggleExpandItem(self.selection_key));
+                        }
+                        // Section is already expanded, proceed to select child
+                    }
+                    SelectionKey::File(file_key) => {
+                        if !self.expanded_items.contains(&SelectionKey::File(file_key)) {
+                            // File is collapsed, expand it
+                            return Ok(StateUpdate::ToggleExpandItem(self.selection_key));
+                        }
+                        // File is already expanded, proceed to select child
+                    }
+                    _ => {}
+                }
+
                 let selection_key = self.select_inner();
                 StateUpdate::SelectItem {
                     selection_key,
@@ -1644,8 +1703,36 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     self.add_member_sections(&mut result, commit_idx, file_idx, member);
                                 }
                             }
-                            crate::SemanticContainer::Function { section_indices, .. } => {
-                                // Functions have sections directly (no members)
+                            crate::SemanticContainer::Class { members, .. } => {
+                                for (member_idx, member) in members.iter().enumerate() {
+                                    result.push(SelectionKey::Member(MemberKey {
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        member_idx,
+                                    }));
+                                    // Add sections within this member
+                                    self.add_member_sections(&mut result, commit_idx, file_idx, member);
+                                }
+                            }
+                            crate::SemanticContainer::Interface { methods, .. } => {
+                                for (member_idx, member) in methods.iter().enumerate() {
+                                    result.push(SelectionKey::Member(MemberKey {
+                                        commit_idx,
+                                        file_idx,
+                                        container_idx,
+                                        member_idx,
+                                    }));
+                                    // Add sections within this member
+                                    self.add_member_sections(&mut result, commit_idx, file_idx, member);
+                                }
+                            }
+                            crate::SemanticContainer::Function { section_indices, .. }
+                            | crate::SemanticContainer::Enum { section_indices, .. }
+                            | crate::SemanticContainer::Object { section_indices, .. }
+                            | crate::SemanticContainer::Module { section_indices, .. }
+                            | crate::SemanticContainer::Section { section_indices, .. } => {
+                                // These containers have sections directly (no members)
                                 for &section_idx in section_indices {
                                     if let Some(section) = file.sections.get(section_idx) {
                                         self.add_section_to_keys(&mut result, commit_idx, file_idx, section_idx, section);
@@ -2403,8 +2490,22 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                             member.set_checked(&mut file.sections, is_checked_new);
                                         }
                                     }
-                                    crate::SemanticContainer::Function { .. } => {
-                                        // Functions don't have members, nothing to do
+                                    crate::SemanticContainer::Class { members, .. } => {
+                                        if let Some(member) = members.get_mut(member_idx) {
+                                            member.set_checked(&mut file.sections, is_checked_new);
+                                        }
+                                    }
+                                    crate::SemanticContainer::Interface { methods, .. } => {
+                                        if let Some(member) = methods.get_mut(member_idx) {
+                                            member.set_checked(&mut file.sections, is_checked_new);
+                                        }
+                                    }
+                                    crate::SemanticContainer::Function { .. }
+                                    | crate::SemanticContainer::Enum { .. }
+                                    | crate::SemanticContainer::Object { .. }
+                                    | crate::SemanticContainer::Module { .. }
+                                    | crate::SemanticContainer::Section { .. } => {
+                                        // These containers don't have members, nothing to do
                                     }
                                 }
                             }
@@ -2644,12 +2745,172 @@ impl<'state, 'input> Recorder<'state, 'input> {
             }
             SelectionKey::Container(container_key) => {
                 if !self.expanded_items.insert(SelectionKey::Container(container_key)) {
+                    // Collapsing the container
                     self.expanded_items.remove(&SelectionKey::Container(container_key));
+                } else {
+                    // Expanding the container - restore default expanded state for members and sections
+                    #[cfg(feature = "tree-sitter")]
+                    {
+                        // Collect what needs to be expanded before modifying expanded_items
+                        let items_to_expand: Vec<SelectionKey> = self.file(FileKey {
+                            commit_idx: container_key.commit_idx,
+                            file_idx: container_key.file_idx
+                        }).ok().and_then(|file| {
+                            file.containers.as_ref().and_then(|containers| {
+                                containers.get(container_key.container_idx).map(|container| {
+                                    use crate::{SemanticContainer, SemanticMember};
+                                    match container {
+                                        SemanticContainer::Struct { fields, .. } => {
+                                            let mut items = Vec::new();
+                                            // Add members
+                                            for (member_idx, field) in fields.iter().enumerate() {
+                                                items.push(SelectionKey::Member(MemberKey {
+                                                    commit_idx: container_key.commit_idx,
+                                                    file_idx: container_key.file_idx,
+                                                    container_idx: container_key.container_idx,
+                                                    member_idx,
+                                                }));
+                                                // Add sections for this member
+                                                let section_indices = match field {
+                                                    SemanticMember::Field { section_indices, .. } => section_indices,
+                                                    SemanticMember::Method { section_indices, .. } => section_indices,
+                                                };
+                                                for &section_idx in section_indices {
+                                                    items.push(SelectionKey::Section(SectionKey {
+                                                        commit_idx: container_key.commit_idx,
+                                                        file_idx: container_key.file_idx,
+                                                        section_idx,
+                                                    }));
+                                                }
+                                            }
+                                            items
+                                        }
+                                        SemanticContainer::Impl { methods, .. } => {
+                                            let mut items = Vec::new();
+                                            // Add members
+                                            for (member_idx, method) in methods.iter().enumerate() {
+                                                items.push(SelectionKey::Member(MemberKey {
+                                                    commit_idx: container_key.commit_idx,
+                                                    file_idx: container_key.file_idx,
+                                                    container_idx: container_key.container_idx,
+                                                    member_idx,
+                                                }));
+                                                // Add sections for this member
+                                                let section_indices = match method {
+                                                    SemanticMember::Field { section_indices, .. } => section_indices,
+                                                    SemanticMember::Method { section_indices, .. } => section_indices,
+                                                };
+                                                for &section_idx in section_indices {
+                                                    items.push(SelectionKey::Section(SectionKey {
+                                                        commit_idx: container_key.commit_idx,
+                                                        file_idx: container_key.file_idx,
+                                                        section_idx,
+                                                    }));
+                                                }
+                                            }
+                                            items
+                                        }
+                                        SemanticContainer::Class { members, .. } => {
+                                            let mut items = Vec::new();
+                                            // Add members
+                                            for (member_idx, member) in members.iter().enumerate() {
+                                                items.push(SelectionKey::Member(MemberKey {
+                                                    commit_idx: container_key.commit_idx,
+                                                    file_idx: container_key.file_idx,
+                                                    container_idx: container_key.container_idx,
+                                                    member_idx,
+                                                }));
+                                                // Add sections for this member
+                                                let section_indices = match member {
+                                                    SemanticMember::Field { section_indices, .. } => section_indices,
+                                                    SemanticMember::Method { section_indices, .. } => section_indices,
+                                                };
+                                                for &section_idx in section_indices {
+                                                    items.push(SelectionKey::Section(SectionKey {
+                                                        commit_idx: container_key.commit_idx,
+                                                        file_idx: container_key.file_idx,
+                                                        section_idx,
+                                                    }));
+                                                }
+                                            }
+                                            items
+                                        }
+                                        SemanticContainer::Interface { methods, .. } => {
+                                            let mut items = Vec::new();
+                                            // Add members
+                                            for (member_idx, method) in methods.iter().enumerate() {
+                                                items.push(SelectionKey::Member(MemberKey {
+                                                    commit_idx: container_key.commit_idx,
+                                                    file_idx: container_key.file_idx,
+                                                    container_idx: container_key.container_idx,
+                                                    member_idx,
+                                                }));
+                                                // Add sections for this member
+                                                let section_indices = match method {
+                                                    SemanticMember::Field { section_indices, .. } => section_indices,
+                                                    SemanticMember::Method { section_indices, .. } => section_indices,
+                                                };
+                                                for &section_idx in section_indices {
+                                                    items.push(SelectionKey::Section(SectionKey {
+                                                        commit_idx: container_key.commit_idx,
+                                                        file_idx: container_key.file_idx,
+                                                        section_idx,
+                                                    }));
+                                                }
+                                            }
+                                            items
+                                        }
+                                        SemanticContainer::Function { section_indices, .. }
+                                        | SemanticContainer::Enum { section_indices, .. }
+                                        | SemanticContainer::Object { section_indices, .. }
+                                        | SemanticContainer::Module { section_indices, .. }
+                                        | SemanticContainer::Section { section_indices, .. } => {
+                                            section_indices.iter().map(|&section_idx| {
+                                                SelectionKey::Section(SectionKey {
+                                                    commit_idx: container_key.commit_idx,
+                                                    file_idx: container_key.file_idx,
+                                                    section_idx,
+                                                })
+                                            }).collect()
+                                        }
+                                    }
+                                })
+                            })
+                        }).unwrap_or_default();
+
+                        // Now expand all the items
+                        for item in items_to_expand {
+                            self.expanded_items.insert(item);
+                        }
+                    }
                 }
             }
             SelectionKey::Member(member_key) => {
                 if !self.expanded_items.insert(SelectionKey::Member(member_key)) {
+                    // Collapsing the member
                     self.expanded_items.remove(&SelectionKey::Member(member_key));
+                } else {
+                    // Expanding the member - restore default expanded state for sections
+                    #[cfg(feature = "tree-sitter")]
+                    {
+                        // Collect section indices before modifying expanded_items
+                        let section_indices: Vec<usize> = self.member(member_key).ok().map(|member| {
+                            use crate::SemanticMember;
+                            match member {
+                                SemanticMember::Field { section_indices, .. } => section_indices.clone(),
+                                SemanticMember::Method { section_indices, .. } => section_indices.clone(),
+                            }
+                        }).unwrap_or_default();
+
+                        // Now expand all the sections
+                        for section_idx in section_indices {
+                            self.expanded_items.insert(SelectionKey::Section(SectionKey {
+                                commit_idx: member_key.commit_idx,
+                                file_idx: member_key.file_idx,
+                                section_idx,
+                            }));
+                        }
+                    }
                 }
             }
             SelectionKey::Section(section_key) => {
@@ -2674,9 +2935,10 @@ impl<'state, 'input> Recorder<'state, 'input> {
             .into_iter()
             .filter(|selection_key| match selection_key {
                 SelectionKey::None | SelectionKey::File(_) | SelectionKey::Line(_) => false,
-                SelectionKey::Container(_) | SelectionKey::Member(_) | SelectionKey::Section(_) => {
-                    true
-                }
+                // Semantic containers start collapsed when a file is expanded
+                SelectionKey::Container(_) => false,
+                // Members and sections are expanded so diff lines are visible immediately
+                SelectionKey::Member(_) | SelectionKey::Section(_) => true,
             })
             .collect();
     }
@@ -2872,7 +3134,11 @@ impl<'state, 'input> Recorder<'state, 'input> {
             use crate::{SemanticContainer, SemanticMember};
 
             match container {
-                SemanticContainer::Function { section_indices, .. } => {
+                SemanticContainer::Function { section_indices, .. }
+                | SemanticContainer::Enum { section_indices, .. }
+                | SemanticContainer::Object { section_indices, .. }
+                | SemanticContainer::Module { section_indices, .. }
+                | SemanticContainer::Section { section_indices, .. } => {
                     if section_indices.contains(&section_idx) {
                         return Some(SelectionKey::Container(ContainerKey {
                             commit_idx,
@@ -2897,6 +3163,38 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     }
                 }
                 SemanticContainer::Impl { methods, .. } => {
+                    // Check each method
+                    for (member_idx, method) in methods.iter().enumerate() {
+                        if let SemanticMember::Method { section_indices, .. } = method {
+                            if section_indices.contains(&section_idx) {
+                                return Some(SelectionKey::Member(MemberKey {
+                                    commit_idx,
+                                    file_idx,
+                                    container_idx,
+                                    member_idx,
+                                }));
+                            }
+                        }
+                    }
+                }
+                SemanticContainer::Class { members, .. } => {
+                    // Check each member (field or method)
+                    for (member_idx, member) in members.iter().enumerate() {
+                        let section_indices = match member {
+                            SemanticMember::Field { section_indices, .. } => section_indices,
+                            SemanticMember::Method { section_indices, .. } => section_indices,
+                        };
+                        if section_indices.contains(&section_idx) {
+                            return Some(SelectionKey::Member(MemberKey {
+                                commit_idx,
+                                file_idx,
+                                container_idx,
+                                member_idx,
+                            }));
+                        }
+                    }
+                }
+                SemanticContainer::Interface { methods, .. } => {
                     // Check each method
                     for (member_idx, method) in methods.iter().enumerate() {
                         if let SemanticMember::Method { section_indices, .. } = method {
@@ -3029,7 +3327,13 @@ impl<'state, 'input> Recorder<'state, 'input> {
         Ok(match container {
             crate::SemanticContainer::Struct { is_checked, is_partial, .. }
             | crate::SemanticContainer::Impl { is_checked, is_partial, .. }
-            | crate::SemanticContainer::Function { is_checked, is_partial, .. } => {
+            | crate::SemanticContainer::Function { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Class { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Interface { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Enum { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Object { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Module { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Section { is_checked, is_partial, .. } => {
                 if *is_checked {
                     if *is_partial {
                         Tristate::Partial
@@ -3059,9 +3363,15 @@ impl<'state, 'input> Recorder<'state, 'input> {
         let members = match container {
             crate::SemanticContainer::Struct { fields, .. } => fields,
             crate::SemanticContainer::Impl { methods, .. } => methods,
-            crate::SemanticContainer::Function { .. } => {
+            crate::SemanticContainer::Class { members, .. } => members,
+            crate::SemanticContainer::Interface { methods, .. } => methods,
+            crate::SemanticContainer::Function { .. }
+            | crate::SemanticContainer::Enum { .. }
+            | crate::SemanticContainer::Object { .. }
+            | crate::SemanticContainer::Module { .. }
+            | crate::SemanticContainer::Section { .. } => {
                 return Err(RecordError::Bug(format!(
-                    "Functions don't have members: {member_key:?}"
+                    "This container type doesn't have members: {member_key:?}"
                 )));
             }
         };
@@ -3705,7 +4015,7 @@ impl ContainerView<'_> {
 
     fn icon_and_name(&self) -> (char, String) {
         match self.container {
-            crate::SemanticContainer::Struct { name, .. } => ('📦', format!("struct {}", name)),
+            crate::SemanticContainer::Struct { name, .. } => ('\u{eb5b}', format!("struct {}", name)),
             crate::SemanticContainer::Impl {
                 type_name,
                 trait_name,
@@ -3715,9 +4025,18 @@ impl ContainerView<'_> {
                     Some(trait_name) => format!("impl {} for {}", trait_name, type_name),
                     None => format!("impl {}", type_name),
                 };
-                ('🔧', name)
+                ('\u{eb97}', name)
             }
-            crate::SemanticContainer::Function { name, .. } => ('⚡', format!("fn {}", name)),
+            crate::SemanticContainer::Function { name, .. } => ('\u{f0871}', format!("fn {}", name)),
+            crate::SemanticContainer::Class { name, .. } => ('\u{eb5b}', format!("class {}", name)),
+            crate::SemanticContainer::Interface { name, .. } => ('\u{ea91}', format!("interface {}", name)),
+            crate::SemanticContainer::Enum { name, .. } => ('\u{eb98}', format!("enum {}", name)),
+            crate::SemanticContainer::Object { name, .. } => ('\u{eb5b}', format!("object {}", name)),
+            crate::SemanticContainer::Module { name, .. } => ('\u{eb5b}', format!("mod {}", name)),
+            crate::SemanticContainer::Section { name, level, .. } => {
+                let prefix = "#".repeat(*level);
+                ('\u{f0274}', format!("{} {}", prefix, name))
+            }
         }
     }
 }
@@ -3741,6 +4060,7 @@ impl Component for ContainerView<'_> {
             member_views,
             section_views,
         } = self;
+
 
         // Draw the container header
         viewport.draw_blank(Rect {
@@ -3823,8 +4143,8 @@ impl MemberView<'_> {
 
     fn icon_and_name(&self) -> (char, String) {
         match self.member {
-            crate::SemanticMember::Field { name, .. } => ('•', format!("field {}", name)),
-            crate::SemanticMember::Method { name, .. } => ('→', format!("fn {}", name)),
+            crate::SemanticMember::Field { name, .. } => ('\u{eb5f}', format!("field {}", name)),
+            crate::SemanticMember::Method { name, .. } => ('\u{f0871}', format!("fn {}", name)),
         }
     }
 }
@@ -4829,6 +5149,394 @@ mod tests {
         fn test_push_lines_from_span(line in ".*") {
             test_push_lines_from_span_impl(line.as_str());
         }
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_function_expanded_items_contains_sections() {
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
+
+        // Reproduce the exact bug: File -> Function, sections not in expanded_items after toggle
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("line 1"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Function {
+                    name: "my_fn".to_string(),
+                    section_indices: vec![0],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let mut recorder = Recorder::new(state, &mut input);
+
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let section_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+
+        eprintln!("\n=== INITIAL expanded_items ===");
+        eprintln!("Container in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Container(container_key)));
+        eprintln!("Section in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Section(section_key)));
+
+        // Expand file
+        recorder.toggle_expand_item(SelectionKey::File(file_key)).unwrap();
+
+        eprintln!("\n=== AFTER EXPANDING FILE ===");
+        eprintln!("File in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::File(file_key)));
+        eprintln!("Container in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Container(container_key)));
+        eprintln!("Section in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Section(section_key)));
+
+        // Expand container - THIS IS WHERE THE BUG HAPPENS
+        eprintln!("\n=== CALLING toggle_expand_item(Container) ===");
+        recorder.toggle_expand_item(SelectionKey::Container(container_key)).unwrap();
+
+        eprintln!("\n=== AFTER EXPANDING CONTAINER ===");
+        eprintln!("All items in expanded_items:");
+        for item in &recorder.expanded_items {
+            eprintln!("  {:?}", item);
+        }
+
+        eprintln!("\nContainer in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Container(container_key)));
+        eprintln!("Section in expanded_items: {}", recorder.expanded_items.contains(&SelectionKey::Section(section_key)));
+
+        // THE BUG: Section should be in expanded_items after expanding the Function container
+        assert!(recorder.expanded_items.contains(&SelectionKey::Container(container_key)),
+            "Container should be in expanded_items after toggle");
+        assert!(recorder.expanded_items.contains(&SelectionKey::Section(section_key)),
+            "BUG REPRODUCED: Section should be in expanded_items after expanding Function container");
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_function_container_shows_sections_when_expanded() {
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
+
+        // This tests: File -> Function -> Sections -> Lines (NO member level)
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("fn body line 1"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("fn body line 2"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Function {
+                    name: "test_function".to_string(),
+                    section_indices: vec![0],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let recorder = Recorder::new(state, &mut input);
+
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let section_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+        let line0_key = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 0 };
+        let line1_key = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 1 };
+
+        // Initially: container collapsed, section expanded
+        assert!(!recorder.expanded_items.contains(&SelectionKey::Container(container_key)),
+            "Container should be collapsed by default");
+        assert!(recorder.expanded_items.contains(&SelectionKey::Section(section_key)),
+            "Section should be expanded by default");
+
+        // Test scenario: User expands file, then expands function container via toggle
+        // This should show sections and lines immediately
+        let mut recorder = recorder;
+        recorder.expanded_items.insert(SelectionKey::File(file_key));
+
+        // Use toggle_expand_item like the real UI does
+        recorder.toggle_expand_item(SelectionKey::Container(container_key)).unwrap();
+
+        let (visible_keys, _) = recorder.find_selection();
+
+        // CRITICAL: Section and Lines MUST be visible when container is expanded
+        assert!(visible_keys.contains(&SelectionKey::Section(section_key)),
+            "BUG: Section should be visible when Function container is expanded - File -> Function -> Section");
+        assert!(visible_keys.contains(&SelectionKey::Line(line0_key)),
+            "BUG: Lines should be visible when Function container is expanded - File -> Function -> Section -> Lines");
+        assert!(visible_keys.contains(&SelectionKey::Line(line1_key)),
+            "BUG: Lines should be visible when Function container is expanded - File -> Function -> Section -> Lines");
+
+        // NOW TEST COLLAPSE AND RE-EXPAND
+        recorder.toggle_expand_item(SelectionKey::Container(container_key)).unwrap();
+
+        let (visible_after_collapse, _) = recorder.find_selection();
+
+        // Section and lines should NOT be visible when collapsed
+        assert!(!visible_after_collapse.contains(&SelectionKey::Section(section_key)),
+            "Section should NOT be visible when container is collapsed");
+        assert!(!visible_after_collapse.contains(&SelectionKey::Line(line0_key)),
+            "Lines should NOT be visible when container is collapsed");
+
+        // NOW RE-EXPAND
+        recorder.toggle_expand_item(SelectionKey::Container(container_key)).unwrap();
+
+        let (visible_after_reexpand, _) = recorder.find_selection();
+
+        // CRITICAL: Section and Lines MUST be visible again after re-expanding
+        assert!(visible_after_reexpand.contains(&SelectionKey::Section(section_key)),
+            "BUG: Section should be visible when Function container is RE-EXPANDED");
+        assert!(visible_after_reexpand.contains(&SelectionKey::Line(line0_key)),
+            "BUG: Lines should be visible when Function container is RE-EXPANDED");
+        assert!(visible_after_reexpand.contains(&SelectionKey::Line(line1_key)),
+            "BUG: Lines should be visible when Function container is RE-EXPANDED");
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_function_container_user_flow_from_startup() {
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
+
+        // Simulate exact user flow: App starts, file collapsed, user expands file, then function
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("line 1"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Function {
+                    name: "my_function".to_string(),
+                    section_indices: vec![0],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let mut recorder = Recorder::new(state, &mut input);
+
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let section_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+        let line_key = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 0 };
+
+        // User action 1: Expand the file
+        recorder.toggle_expand_item(SelectionKey::File(file_key)).unwrap();
+
+        let (visible_after_file_expand, _) = recorder.find_selection();
+
+        // Container should be visible but collapsed
+        assert!(visible_after_file_expand.contains(&SelectionKey::File(file_key)));
+        assert!(visible_after_file_expand.contains(&SelectionKey::Container(container_key)));
+        assert!(!visible_after_file_expand.contains(&SelectionKey::Section(section_key)),
+            "Section should NOT be visible when container is still collapsed");
+
+        // User action 2: Expand the function container
+        recorder.toggle_expand_item(SelectionKey::Container(container_key)).unwrap();
+
+        let (visible_after_container_expand, _) = recorder.find_selection();
+
+        // CRITICAL BUG CHECK: Sections and lines MUST be visible now
+        assert!(visible_after_container_expand.contains(&SelectionKey::Section(section_key)),
+            "CRITICAL BUG: Section not visible after expanding Function container from startup flow");
+        assert!(visible_after_container_expand.contains(&SelectionKey::Line(line_key)),
+            "CRITICAL BUG: Lines not visible after expanding Function container from startup flow");
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_member_expansion_shows_sections_and_lines() {
+        use crate::{SemanticContainer, SemanticMember, ChangeType, SectionChangedLine};
+
+        // Test with a Struct that has a Member (Field)
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("field_value"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Struct {
+                    name: "TestStruct".to_string(),
+                    fields: vec![
+                        SemanticMember::Field {
+                            name: "test_field".to_string(),
+                            section_indices: vec![0],
+                            is_checked: false,
+                            is_partial: false,
+                        },
+                    ],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let mut recorder = Recorder::new(state, &mut input);
+
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let member_key = MemberKey { commit_idx: 0, file_idx: 0, container_idx: 0, member_idx: 0 };
+        let section_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+        let line_key = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 0 };
+
+        // Section should be in expanded_items by default
+        assert!(recorder.expanded_items.contains(&SelectionKey::Section(section_key)),
+            "Section should be expanded by default");
+
+        // Member should ALSO be in expanded_items by default (so sections/lines show immediately)
+        assert!(recorder.expanded_items.contains(&SelectionKey::Member(member_key)),
+            "Member should be expanded by default to show sections/lines immediately");
+
+        // Expand file, container, and member
+        recorder.expanded_items.insert(SelectionKey::File(file_key));
+        recorder.expanded_items.insert(SelectionKey::Container(container_key));
+        recorder.expanded_items.insert(SelectionKey::Member(member_key));
+
+        let (visible_keys, _) = recorder.find_selection();
+
+        // Member should be visible
+        assert!(visible_keys.contains(&SelectionKey::Member(member_key)),
+            "Member should be visible when container is expanded");
+
+        // Section should be visible when member is expanded
+        assert!(visible_keys.contains(&SelectionKey::Section(section_key)),
+            "Section should be visible when member is expanded");
+
+        // Lines should be visible (because section is expanded by default)
+        assert!(visible_keys.contains(&SelectionKey::Line(line_key)),
+            "Lines should be visible when member is expanded and section is expanded by default");
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter")]
+    fn test_sections_expanded_by_default() {
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
+
+        let file = File {
+            old_path: None,
+            path: Cow::Borrowed(Path::new("test.rs")),
+            file_mode: FileMode::FILE_DEFAULT,
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("new line"),
+                        },
+                    ],
+                },
+            ],
+            containers: Some(vec![
+                SemanticContainer::Function {
+                    name: "test_fn".to_string(),
+                    section_indices: vec![0],
+                    is_checked: false,
+                    is_partial: false,
+                },
+            ]),
+        };
+
+        let state = RecordState {
+            is_read_only: false,
+            commits: vec![Commit::default()],
+            files: vec![file],
+        };
+
+        let mut input = TestingInput::new(80, 24, []);
+        let mut recorder = Recorder::new(state, &mut input);
+
+        let file_key = FileKey { commit_idx: 0, file_idx: 0 };
+        let container_key = ContainerKey { commit_idx: 0, file_idx: 0, container_idx: 0 };
+        let section_key = SectionKey { commit_idx: 0, file_idx: 0, section_idx: 0 };
+        let line_key = LineKey { commit_idx: 0, file_idx: 0, section_idx: 0, line_idx: 0 };
+
+        // Verify section is in expanded_items by default
+        assert!(recorder.expanded_items.contains(&SelectionKey::Section(section_key)),
+            "Sections should be expanded by default");
+
+        // Expand file and container to make section and lines visible
+        recorder.expanded_items.insert(SelectionKey::File(file_key));
+        recorder.expanded_items.insert(SelectionKey::Container(container_key));
+
+        let (visible_keys, _) = recorder.find_selection();
+
+        // Section should be visible
+        assert!(visible_keys.contains(&SelectionKey::Section(section_key)),
+            "Section should be visible when container is expanded");
+
+        // Lines should be visible (because section is expanded by default)
+        assert!(visible_keys.contains(&SelectionKey::Line(line_key)),
+            "Lines should be visible when container is expanded and section is expanded by default");
     }
 
     #[test]

@@ -178,6 +178,24 @@ pub fn create_file(
                     scm_record::SemanticContainer::Function { name, section_indices, .. } => {
                         debug!("  - Function '{}' with {} section(s)", name, section_indices.len());
                     }
+                    scm_record::SemanticContainer::Class { name, members, .. } => {
+                        debug!("  - Class '{}' with {} member(s)", name, members.len());
+                    }
+                    scm_record::SemanticContainer::Interface { name, methods, .. } => {
+                        debug!("  - Interface '{}' with {} method(s)", name, methods.len());
+                    }
+                    scm_record::SemanticContainer::Enum { name, section_indices, .. } => {
+                        debug!("  - Enum '{}' with {} section(s)", name, section_indices.len());
+                    }
+                    scm_record::SemanticContainer::Object { name, section_indices, .. } => {
+                        debug!("  - Object '{}' with {} section(s)", name, section_indices.len());
+                    }
+                    scm_record::SemanticContainer::Module { name, section_indices, .. } => {
+                        debug!("  - Module '{}' with {} section(s)", name, section_indices.len());
+                    }
+                    scm_record::SemanticContainer::Section { name, level, section_indices, .. } => {
+                        debug!("  - Section '{}' (level {}) with {} section(s)", name, level, section_indices.len());
+                    }
                 }
             }
         } else {

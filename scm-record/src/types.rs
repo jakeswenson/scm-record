@@ -200,6 +200,80 @@ pub enum SemanticContainer {
         /// Whether some (but not all) changes in this container are selected
         is_partial: bool,
     },
+
+    /// A class definition (Kotlin, Java, Python) with its members.
+    Class {
+        /// The name of the class
+        name: String,
+        /// The members (fields/methods) defined in this class
+        members: Vec<SemanticMember>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// An interface definition (Kotlin, Java) with its methods.
+    Interface {
+        /// The name of the interface
+        name: String,
+        /// The methods defined in this interface
+        methods: Vec<SemanticMember>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// An enum definition (Kotlin, Java).
+    Enum {
+        /// The name of the enum
+        name: String,
+        /// Indices into the file's sections Vec for sections within this enum
+        section_indices: Vec<usize>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// An object declaration (Kotlin singleton).
+    Object {
+        /// The name of the object
+        name: String,
+        /// Indices into the file's sections Vec for sections within this object
+        section_indices: Vec<usize>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// A module (Rust, HCL).
+    Module {
+        /// The name of the module
+        name: String,
+        /// Indices into the file's sections Vec for sections within this module
+        section_indices: Vec<usize>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// A markdown section (heading).
+    Section {
+        /// The heading text
+        name: String,
+        /// The heading level (1-6)
+        level: usize,
+        /// Indices into the file's sections Vec for sections within this heading
+        section_indices: Vec<usize>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
 }
 
 /// A semantic member within a container (e.g., field, method).
@@ -265,7 +339,55 @@ impl SemanticContainer {
                     method.set_checked(file_sections, is_checked);
                 }
             }
+            SemanticContainer::Class {
+                members,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            } => {
+                *container_checked = is_checked;
+                *is_partial = false;
+                for member in members {
+                    member.set_checked(file_sections, is_checked);
+                }
+            }
+            SemanticContainer::Interface {
+                methods,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            } => {
+                *container_checked = is_checked;
+                *is_partial = false;
+                for method in methods {
+                    method.set_checked(file_sections, is_checked);
+                }
+            }
             SemanticContainer::Function {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Enum {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Object {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Module {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Section {
                 section_indices,
                 is_checked: container_checked,
                 is_partial,
