@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use insta::assert_debug_snapshot;
 use maplit::btreemap;
 
-use scm_diff_editor::testing::{file_info, select_all, TestFilesystem};
-use scm_diff_editor::{apply_changes, process_opts, DiffContext, Opts, Result};
+use syntax_diff_editor::testing::{file_info, select_all, TestFilesystem};
+use syntax_diff_editor::{apply_changes, process_opts, DiffContext, Opts, Result};
 use scm_record::{RecordState, Section};
 
 #[test]

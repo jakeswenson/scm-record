@@ -1081,13 +1081,13 @@ pub enum SemanticError {
 
 /// Try to enhance a File with semantic containers by parsing the file contents.
 ///
-/// This is the main integration point for scm-diff-editor. Call this after
+/// This is the main integration point for syntax-diff-editor. Call this after
 /// creating a File with sections to optionally populate the `containers` field.
 ///
 /// If semantic parsing fails for any reason, the File is returned unchanged
 /// (with empty containers field), allowing graceful fallback to diff-first navigation.
 ///
-/// # Example (for scm-diff-editor integration)
+/// # Example (for syntax-diff-editor integration)
 ///
 /// ```ignore
 /// let mut file = File {

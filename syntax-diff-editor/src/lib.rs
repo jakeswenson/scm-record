@@ -562,7 +562,7 @@ pub fn apply_changes(
 pub fn run(opts: Opts) -> Result<()> {
     use tracing::{debug, info};
 
-    debug!("Starting scm-diff-editor with opts: {:?}", opts);
+    debug!("Starting syntax-diff-editor with opts: {:?}", opts);
 
     // Check if we're running in a TTY
     let is_stdin_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());

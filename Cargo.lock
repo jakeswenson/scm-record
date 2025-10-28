@@ -1093,22 +1093,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scm-diff-editor"
-version = "0.8.0"
-dependencies = [
- "clap",
- "diffy",
- "insta",
- "maplit",
- "scm-record",
- "sha1",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "walkdir",
-]
-
-[[package]]
 name = "scm-record"
 version = "0.8.0"
 dependencies = [
@@ -1303,6 +1287,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "syntax-diff-editor"
+version = "0.8.0"
+dependencies = [
+ "clap",
+ "diffy",
+ "insta",
+ "maplit",
+ "scm-record",
+ "sha1",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]

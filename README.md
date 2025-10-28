@@ -22,13 +22,13 @@ The `scm-record` library is directly integrated into these projects:
 
 ## Standalone executable
 
-`scm-diff-editor` is a standalone executable that uses `scm-record` as the front-end. It can be installed via `cargo`:
+`syntax-diff-editor` is a standalone executable that uses `scm-record` as the front-end. It can be installed via `cargo`:
 
 ```sh
-$ cargo install --locked scm-diff-editor
+$ cargo install --locked syntax-diff-editor
 ```
 
-The `scm-diff-editor` executable can be used with these tools:
+The `syntax-diff-editor` executable can be used with these tools:
 
 - [Git](https://git-scm.org): as a [difftool](https://git-scm.com/docs/git-difftool).
 - [Mercurial](https://www.mercurial-scm.org/): via [the `extdiff` extension](https://wiki.mercurial-scm.org/ExtdiffExtension).
