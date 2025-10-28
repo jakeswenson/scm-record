@@ -167,8 +167,8 @@ pub enum SemanticContainer {
     Struct {
         /// The name of the struct
         name: String,
-        /// The fields defined in this struct
-        fields: Vec<SemanticMember>,
+        /// The child containers (fields) defined in this struct
+        children: Vec<SemanticContainer>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -181,8 +181,8 @@ pub enum SemanticContainer {
         type_name: String,
         /// The trait being implemented, if any (e.g., "Display" for "impl Display for Foo")
         trait_name: Option<String>,
-        /// The methods defined in this impl block
-        methods: Vec<SemanticMember>,
+        /// The child containers (methods) defined in this impl block
+        children: Vec<SemanticContainer>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -205,8 +205,8 @@ pub enum SemanticContainer {
     Class {
         /// The name of the class
         name: String,
-        /// The members (fields/methods) defined in this class
-        members: Vec<SemanticMember>,
+        /// The child containers (fields/methods) defined in this class
+        children: Vec<SemanticContainer>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -217,8 +217,8 @@ pub enum SemanticContainer {
     Interface {
         /// The name of the interface
         name: String,
-        /// The methods defined in this interface
-        methods: Vec<SemanticMember>,
+        /// The child containers (methods) defined in this interface
+        children: Vec<SemanticContainer>,
         /// Whether all changes in this container are selected
         is_checked: bool,
         /// Whether some (but not all) changes in this container are selected
@@ -274,40 +274,32 @@ pub enum SemanticContainer {
         /// Whether some (but not all) changes in this container are selected
         is_partial: bool,
     },
-}
 
-/// A semantic member within a container (e.g., field, method).
-///
-/// Members represent individual elements within a semantic container,
-/// such as struct fields or impl methods.
-#[cfg(feature = "tree-sitter")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub enum SemanticMember {
-    /// A field within a struct.
-    Field {
-        /// The name of the field
-        name: String,
-        /// Indices into the file's sections Vec for sections within this field
-        section_indices: Vec<usize>,
-        /// Whether all changes to this field are selected
-        is_checked: bool,
-        /// Whether some (but not all) changes to this field are selected
-        is_partial: bool,
-    },
-
-    /// A method within an impl block.
+    /// A method (inside impl, class, or interface).
     Method {
         /// The name of the method
         name: String,
         /// Indices into the file's sections Vec for sections within this method
         section_indices: Vec<usize>,
-        /// Whether all changes to this method are selected
+        /// Whether all changes in this container are selected
         is_checked: bool,
-        /// Whether some (but not all) changes to this method are selected
+        /// Whether some (but not all) changes in this container are selected
+        is_partial: bool,
+    },
+
+    /// A field (inside struct or class).
+    Field {
+        /// The name of the field
+        name: String,
+        /// Indices into the file's sections Vec for sections within this field
+        section_indices: Vec<usize>,
+        /// Whether all changes in this container are selected
+        is_checked: bool,
+        /// Whether some (but not all) changes in this container are selected
         is_partial: bool,
     },
 }
+
 
 #[cfg(feature = "tree-sitter")]
 impl SemanticContainer {
@@ -316,54 +308,48 @@ impl SemanticContainer {
     pub fn set_checked(&mut self, file_sections: &mut [Section], is_checked: bool) {
         match self {
             SemanticContainer::Struct {
-                fields,
+                children,
                 is_checked: container_checked,
                 is_partial,
                 ..
-            } => {
-                *container_checked = is_checked;
-                *is_partial = false;
-                for field in fields {
-                    field.set_checked(file_sections, is_checked);
-                }
             }
-            SemanticContainer::Impl {
-                methods,
+            | SemanticContainer::Impl {
+                children,
                 is_checked: container_checked,
                 is_partial,
                 ..
-            } => {
-                *container_checked = is_checked;
-                *is_partial = false;
-                for method in methods {
-                    method.set_checked(file_sections, is_checked);
-                }
             }
-            SemanticContainer::Class {
-                members,
+            | SemanticContainer::Class {
+                children,
                 is_checked: container_checked,
                 is_partial,
                 ..
-            } => {
-                *container_checked = is_checked;
-                *is_partial = false;
-                for member in members {
-                    member.set_checked(file_sections, is_checked);
-                }
             }
-            SemanticContainer::Interface {
-                methods,
+            | SemanticContainer::Interface {
+                children,
                 is_checked: container_checked,
                 is_partial,
                 ..
             } => {
                 *container_checked = is_checked;
                 *is_partial = false;
-                for method in methods {
-                    method.set_checked(file_sections, is_checked);
+                for child in children {
+                    child.set_checked(file_sections, is_checked);
                 }
             }
             SemanticContainer::Function {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Method {
+                section_indices,
+                is_checked: container_checked,
+                is_partial,
+                ..
+            }
+            | SemanticContainer::Field {
                 section_indices,
                 is_checked: container_checked,
                 is_partial,
@@ -394,36 +380,6 @@ impl SemanticContainer {
                 ..
             } => {
                 *container_checked = is_checked;
-                *is_partial = false;
-                for section_idx in section_indices.iter().copied() {
-                    if let Some(section) = file_sections.get_mut(section_idx) {
-                        section.set_checked(is_checked);
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "tree-sitter")]
-impl SemanticMember {
-    /// Set the checked state for this member and all its sections.
-    /// Requires access to the file's sections to update the actual section state.
-    pub fn set_checked(&mut self, file_sections: &mut [Section], is_checked: bool) {
-        match self {
-            SemanticMember::Field {
-                section_indices,
-                is_checked: member_checked,
-                is_partial,
-                ..
-            }
-            | SemanticMember::Method {
-                section_indices,
-                is_checked: member_checked,
-                is_partial,
-                ..
-            } => {
-                *member_checked = is_checked;
                 *is_partial = false;
                 for section_idx in section_indices.iter().copied() {
                     if let Some(section) = file_sections.get_mut(section_idx) {

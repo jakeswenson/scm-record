@@ -25,5 +25,5 @@ pub use types::{
 };
 
 #[cfg(feature = "tree-sitter")]
-pub use types::{SemanticContainer, SemanticMember};
+pub use types::SemanticContainer;
 pub use ui::{Event, RecordInput, Recorder, TerminalKind, TestingScreenshot};

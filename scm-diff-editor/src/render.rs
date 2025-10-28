@@ -167,22 +167,22 @@ pub fn create_file(
             debug!("Successfully added {} semantic container(s) to {:?}:", containers.len(), file.path);
             for container in containers {
                 match container {
-                    scm_record::SemanticContainer::Struct { name, fields, .. } => {
-                        debug!("  - Struct '{}' with {} field(s)", name, fields.len());
+                    scm_record::SemanticContainer::Struct { name, children, .. } => {
+                        debug!("  - Struct '{}' with {} field(s)", name, children.len());
                     }
-                    scm_record::SemanticContainer::Impl { type_name, trait_name, methods, .. } => {
+                    scm_record::SemanticContainer::Impl { type_name, trait_name, children, .. } => {
                         debug!("  - Impl{} '{}' with {} method(s)",
                             trait_name.as_ref().map(|t| format!(" {}", t)).unwrap_or_default(),
-                            type_name, methods.len());
+                            type_name, children.len());
                     }
                     scm_record::SemanticContainer::Function { name, section_indices, .. } => {
                         debug!("  - Function '{}' with {} section(s)", name, section_indices.len());
                     }
-                    scm_record::SemanticContainer::Class { name, members, .. } => {
-                        debug!("  - Class '{}' with {} member(s)", name, members.len());
+                    scm_record::SemanticContainer::Class { name, children, .. } => {
+                        debug!("  - Class '{}' with {} member(s)", name, children.len());
                     }
-                    scm_record::SemanticContainer::Interface { name, methods, .. } => {
-                        debug!("  - Interface '{}' with {} method(s)", name, methods.len());
+                    scm_record::SemanticContainer::Interface { name, children, .. } => {
+                        debug!("  - Interface '{}' with {} method(s)", name, children.len());
                     }
                     scm_record::SemanticContainer::Enum { name, section_indices, .. } => {
                         debug!("  - Enum '{}' with {} section(s)", name, section_indices.len());
@@ -195,6 +195,12 @@ pub fn create_file(
                     }
                     scm_record::SemanticContainer::Section { name, level, section_indices, .. } => {
                         debug!("  - Section '{}' (level {}) with {} section(s)", name, level, section_indices.len());
+                    }
+                    scm_record::SemanticContainer::Method { name, section_indices, .. } => {
+                        debug!("  - Method '{}' with {} section(s)", name, section_indices.len());
+                    }
+                    scm_record::SemanticContainer::Field { name, section_indices, .. } => {
+                        debug!("  - Field '{}' with {} section(s)", name, section_indices.len());
                     }
                 }
             }

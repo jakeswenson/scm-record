@@ -1241,7 +1241,7 @@ pub fn try_add_semantic_containers<'a>(
     old_source: &str,
     new_source: &str,
 ) -> crate::File<'a> {
-    use crate::{SemanticContainer, SemanticMember};
+    use crate::SemanticContainer;
 
     // Detect language from file path
     let language = match SupportedLanguage::from_path(&file.path) {
@@ -1326,7 +1326,7 @@ pub fn try_add_semantic_containers<'a>(
 
             let container = match container.kind {
                 ContainerKind::Struct => {
-                    let fields: Vec<_> = members
+                    let children: Vec<_> = members
                         .into_iter()
                         .enumerate()
                         .filter_map(|(member_idx, m)| {
@@ -1344,7 +1344,7 @@ pub fn try_add_semantic_containers<'a>(
                             }
 
                             // Keep ALL sections (including context) for display
-                            Some(SemanticMember::Field {
+                            Some(SemanticContainer::Field {
                                 name: m.name,
                                 section_indices,
                                 is_checked: false,
@@ -1354,19 +1354,19 @@ pub fn try_add_semantic_containers<'a>(
                         .collect();
 
                     // Filter out structs with no fields that have changes
-                    if fields.is_empty() {
+                    if children.is_empty() {
                         return None;
                     }
 
                     SemanticContainer::Struct {
                         name: container.name,
-                        fields,
+                        children,
                         is_checked: false,
                         is_partial: false,
                     }
                 }
                 ContainerKind::Impl { trait_name } => {
-                    let methods: Vec<_> = members
+                    let children: Vec<_> = members
                         .into_iter()
                         .enumerate()
                         .filter_map(|(member_idx, m)| {
@@ -1384,7 +1384,7 @@ pub fn try_add_semantic_containers<'a>(
                             }
 
                             // Keep ALL sections (including context) for display
-                            Some(SemanticMember::Method {
+                            Some(SemanticContainer::Method {
                                 name: m.name,
                                 section_indices,
                                 is_checked: false,
@@ -1394,14 +1394,14 @@ pub fn try_add_semantic_containers<'a>(
                         .collect();
 
                     // Filter out impls with no methods that have changes
-                    if methods.is_empty() {
+                    if children.is_empty() {
                         return None;
                     }
 
                     SemanticContainer::Impl {
                         type_name: container.name,
                         trait_name,
-                        methods,
+                        children,
                         is_checked: false,
                         is_partial: false,
                     }
@@ -1427,7 +1427,7 @@ pub fn try_add_semantic_containers<'a>(
                     }
                 }
                 ContainerKind::Class => {
-                    let members: Vec<_> = members
+                    let children: Vec<_> = members
                         .into_iter()
                         .enumerate()
                         .filter_map(|(member_idx, m)| {
@@ -1446,13 +1446,13 @@ pub fn try_add_semantic_containers<'a>(
 
                             // Determine member type based on MemberKind
                             match m.kind {
-                                MemberKind::Field | MemberKind::Property => Some(SemanticMember::Field {
+                                MemberKind::Field | MemberKind::Property => Some(SemanticContainer::Field {
                                     name: m.name,
                                     section_indices,
                                     is_checked: false,
                                     is_partial: false,
                                 }),
-                                MemberKind::Method => Some(SemanticMember::Method {
+                                MemberKind::Method => Some(SemanticContainer::Method {
                                     name: m.name,
                                     section_indices,
                                     is_checked: false,
@@ -1463,19 +1463,19 @@ pub fn try_add_semantic_containers<'a>(
                         .collect();
 
                     // Filter out classes with no members that have changes
-                    if members.is_empty() {
+                    if children.is_empty() {
                         return None;
                     }
 
                     SemanticContainer::Class {
                         name: container.name,
-                        members,
+                        children,
                         is_checked: false,
                         is_partial: false,
                     }
                 }
                 ContainerKind::Interface => {
-                    let methods: Vec<_> = members
+                    let children: Vec<_> = members
                         .into_iter()
                         .enumerate()
                         .filter_map(|(member_idx, m)| {
@@ -1492,7 +1492,7 @@ pub fn try_add_semantic_containers<'a>(
                                 return None;
                             }
 
-                            Some(SemanticMember::Method {
+                            Some(SemanticContainer::Method {
                                 name: m.name,
                                 section_indices,
                                 is_checked: false,
@@ -1502,13 +1502,13 @@ pub fn try_add_semantic_containers<'a>(
                         .collect();
 
                     // Filter out interfaces with no methods that have changes
-                    if methods.is_empty() {
+                    if children.is_empty() {
                         return None;
                     }
 
                     SemanticContainer::Interface {
                         name: container.name,
-                        methods,
+                        children,
                         is_checked: false,
                         is_partial: false,
                     }

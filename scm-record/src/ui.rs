@@ -966,42 +966,42 @@ impl<'state, 'input> Recorder<'state, 'input> {
 
                             // Build member views or section views depending on container type
                             let (member_views, section_views) = match container {
-                                crate::SemanticContainer::Struct { fields, .. } => {
+                                crate::SemanticContainer::Struct { children, .. } => {
                                     let member_views = self.make_member_views(
                                         commit_idx,
                                         file_idx,
                                         container_idx,
-                                        fields,
+                                        children,
                                         is_read_only,
                                     );
                                     (member_views, Vec::new())
                                 }
-                                crate::SemanticContainer::Impl { methods, .. } => {
+                                crate::SemanticContainer::Impl { children, .. } => {
                                     let member_views = self.make_member_views(
                                         commit_idx,
                                         file_idx,
                                         container_idx,
-                                        methods,
+                                        children,
                                         is_read_only,
                                     );
                                     (member_views, Vec::new())
                                 }
-                                crate::SemanticContainer::Class { members, .. } => {
+                                crate::SemanticContainer::Class { children, .. } => {
                                     let member_views = self.make_member_views(
                                         commit_idx,
                                         file_idx,
                                         container_idx,
-                                        members,
+                                        children,
                                         is_read_only,
                                     );
                                     (member_views, Vec::new())
                                 }
-                                crate::SemanticContainer::Interface { methods, .. } => {
+                                crate::SemanticContainer::Interface { children, .. } => {
                                     let member_views = self.make_member_views(
                                         commit_idx,
                                         file_idx,
                                         container_idx,
-                                        methods,
+                                        children,
                                         is_read_only,
                                     );
                                     (member_views, Vec::new())
@@ -1010,7 +1010,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                 | crate::SemanticContainer::Enum { section_indices, .. }
                                 | crate::SemanticContainer::Object { section_indices, .. }
                                 | crate::SemanticContainer::Module { section_indices, .. }
-                                | crate::SemanticContainer::Section { section_indices, .. } => {
+                                | crate::SemanticContainer::Section { section_indices, .. }
+                                | crate::SemanticContainer::Method { section_indices, .. }
+                                | crate::SemanticContainer::Field { section_indices, .. } => {
                                     // These containers have sections directly, no members
                                     let section_views = self.make_section_views_for_indices(
                                         commit_idx,
@@ -1193,7 +1195,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
         commit_idx: usize,
         file_idx: usize,
         container_idx: usize,
-        members: &'state [crate::SemanticMember],
+        members: &'state [crate::SemanticContainer],
         is_read_only: bool,
     ) -> Vec<MemberView<'state>> {
         members
@@ -1219,8 +1221,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
                 };
 
                 let section_indices = match member {
-                    crate::SemanticMember::Field { section_indices, .. } => section_indices,
-                    crate::SemanticMember::Method { section_indices, .. } => section_indices,
+                    crate::SemanticContainer::Field { section_indices, .. } => section_indices,
+                    crate::SemanticContainer::Method { section_indices, .. } => section_indices,
+                    _ => panic!("make_member_views called with non-member container"),
                 };
 
                 let section_views =
@@ -1679,8 +1682,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
 
                         // Render members (fields/methods) if this container has them
                         match container {
-                            crate::SemanticContainer::Struct { fields, .. } => {
-                                for (member_idx, member) in fields.iter().enumerate() {
+                            crate::SemanticContainer::Struct { children, .. } => {
+                                for (member_idx, member) in children.iter().enumerate() {
                                     result.push(SelectionKey::Member(MemberKey {
                                         commit_idx,
                                         file_idx,
@@ -1691,8 +1694,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     self.add_member_sections(&mut result, commit_idx, file_idx, member);
                                 }
                             }
-                            crate::SemanticContainer::Impl { methods, .. } => {
-                                for (member_idx, member) in methods.iter().enumerate() {
+                            crate::SemanticContainer::Impl { children, .. } => {
+                                for (member_idx, member) in children.iter().enumerate() {
                                     result.push(SelectionKey::Member(MemberKey {
                                         commit_idx,
                                         file_idx,
@@ -1703,8 +1706,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     self.add_member_sections(&mut result, commit_idx, file_idx, member);
                                 }
                             }
-                            crate::SemanticContainer::Class { members, .. } => {
-                                for (member_idx, member) in members.iter().enumerate() {
+                            crate::SemanticContainer::Class { children, .. } => {
+                                for (member_idx, member) in children.iter().enumerate() {
                                     result.push(SelectionKey::Member(MemberKey {
                                         commit_idx,
                                         file_idx,
@@ -1715,8 +1718,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     self.add_member_sections(&mut result, commit_idx, file_idx, member);
                                 }
                             }
-                            crate::SemanticContainer::Interface { methods, .. } => {
-                                for (member_idx, member) in methods.iter().enumerate() {
+                            crate::SemanticContainer::Interface { children, .. } => {
+                                for (member_idx, member) in children.iter().enumerate() {
                                     result.push(SelectionKey::Member(MemberKey {
                                         commit_idx,
                                         file_idx,
@@ -1731,7 +1734,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
                             | crate::SemanticContainer::Enum { section_indices, .. }
                             | crate::SemanticContainer::Object { section_indices, .. }
                             | crate::SemanticContainer::Module { section_indices, .. }
-                            | crate::SemanticContainer::Section { section_indices, .. } => {
+                            | crate::SemanticContainer::Section { section_indices, .. }
+                            | crate::SemanticContainer::Method { section_indices, .. }
+                            | crate::SemanticContainer::Field { section_indices, .. } => {
                                 // These containers have sections directly (no members)
                                 for &section_idx in section_indices {
                                     if let Some(section) = file.sections.get(section_idx) {
@@ -1759,11 +1764,12 @@ impl<'state, 'input> Recorder<'state, 'input> {
         result: &mut Vec<SelectionKey>,
         commit_idx: usize,
         file_idx: usize,
-        member: &crate::SemanticMember,
+        member: &crate::SemanticContainer,
     ) {
         let section_indices = match member {
-            crate::SemanticMember::Field { section_indices, .. } => section_indices,
-            crate::SemanticMember::Method { section_indices, .. } => section_indices,
+            crate::SemanticContainer::Field { section_indices, .. } => section_indices,
+            crate::SemanticContainer::Method { section_indices, .. } => section_indices,
+            _ => panic!("add_member_sections called with non-member container"),
         };
 
         // Look up sections from file.sections using the indices
@@ -2480,23 +2486,23 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         if let Some(containers) = &mut file.containers {
                             if let Some(container) = containers.get_mut(container_idx) {
                                 match container {
-                                    crate::SemanticContainer::Struct { fields, .. } => {
-                                        if let Some(member) = fields.get_mut(member_idx) {
+                                    crate::SemanticContainer::Struct { children, .. } => {
+                                        if let Some(member) = children.get_mut(member_idx) {
                                             member.set_checked(&mut file.sections, is_checked_new);
                                         }
                                     }
-                                    crate::SemanticContainer::Impl { methods, .. } => {
-                                        if let Some(member) = methods.get_mut(member_idx) {
+                                    crate::SemanticContainer::Impl { children, .. } => {
+                                        if let Some(member) = children.get_mut(member_idx) {
                                             member.set_checked(&mut file.sections, is_checked_new);
                                         }
                                     }
-                                    crate::SemanticContainer::Class { members, .. } => {
-                                        if let Some(member) = members.get_mut(member_idx) {
+                                    crate::SemanticContainer::Class { children, .. } => {
+                                        if let Some(member) = children.get_mut(member_idx) {
                                             member.set_checked(&mut file.sections, is_checked_new);
                                         }
                                     }
-                                    crate::SemanticContainer::Interface { methods, .. } => {
-                                        if let Some(member) = methods.get_mut(member_idx) {
+                                    crate::SemanticContainer::Interface { children, .. } => {
+                                        if let Some(member) = children.get_mut(member_idx) {
                                             member.set_checked(&mut file.sections, is_checked_new);
                                         }
                                     }
@@ -2504,7 +2510,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
                                     | crate::SemanticContainer::Enum { .. }
                                     | crate::SemanticContainer::Object { .. }
                                     | crate::SemanticContainer::Module { .. }
-                                    | crate::SemanticContainer::Section { .. } => {
+                                    | crate::SemanticContainer::Section { .. }
+                                    | crate::SemanticContainer::Field { .. }
+                                    | crate::SemanticContainer::Method { .. } => {
                                         // These containers don't have members, nothing to do
                                     }
                                 }
@@ -2751,120 +2759,32 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     // Expanding the container - restore default expanded state for members and sections
                     #[cfg(feature = "tree-sitter")]
                     {
-                        // Collect what needs to be expanded before modifying expanded_items
+                        // When expanding a container with children (Struct/Impl/Class/Interface),
+                        // DON'T auto-expand the children - they should be visible but collapsed.
+                        // Only containers without children (Function/Enum/etc) need their sections expanded.
                         let items_to_expand: Vec<SelectionKey> = self.file(FileKey {
                             commit_idx: container_key.commit_idx,
                             file_idx: container_key.file_idx
                         }).ok().and_then(|file| {
                             file.containers.as_ref().and_then(|containers| {
                                 containers.get(container_key.container_idx).map(|container| {
-                                    use crate::{SemanticContainer, SemanticMember};
+                                    use crate::SemanticContainer;
                                     match container {
-                                        SemanticContainer::Struct { fields, .. } => {
-                                            let mut items = Vec::new();
-                                            // Add members
-                                            for (member_idx, field) in fields.iter().enumerate() {
-                                                items.push(SelectionKey::Member(MemberKey {
-                                                    commit_idx: container_key.commit_idx,
-                                                    file_idx: container_key.file_idx,
-                                                    container_idx: container_key.container_idx,
-                                                    member_idx,
-                                                }));
-                                                // Add sections for this member
-                                                let section_indices = match field {
-                                                    SemanticMember::Field { section_indices, .. } => section_indices,
-                                                    SemanticMember::Method { section_indices, .. } => section_indices,
-                                                };
-                                                for &section_idx in section_indices {
-                                                    items.push(SelectionKey::Section(SectionKey {
-                                                        commit_idx: container_key.commit_idx,
-                                                        file_idx: container_key.file_idx,
-                                                        section_idx,
-                                                    }));
-                                                }
-                                            }
-                                            items
-                                        }
-                                        SemanticContainer::Impl { methods, .. } => {
-                                            let mut items = Vec::new();
-                                            // Add members
-                                            for (member_idx, method) in methods.iter().enumerate() {
-                                                items.push(SelectionKey::Member(MemberKey {
-                                                    commit_idx: container_key.commit_idx,
-                                                    file_idx: container_key.file_idx,
-                                                    container_idx: container_key.container_idx,
-                                                    member_idx,
-                                                }));
-                                                // Add sections for this member
-                                                let section_indices = match method {
-                                                    SemanticMember::Field { section_indices, .. } => section_indices,
-                                                    SemanticMember::Method { section_indices, .. } => section_indices,
-                                                };
-                                                for &section_idx in section_indices {
-                                                    items.push(SelectionKey::Section(SectionKey {
-                                                        commit_idx: container_key.commit_idx,
-                                                        file_idx: container_key.file_idx,
-                                                        section_idx,
-                                                    }));
-                                                }
-                                            }
-                                            items
-                                        }
-                                        SemanticContainer::Class { members, .. } => {
-                                            let mut items = Vec::new();
-                                            // Add members
-                                            for (member_idx, member) in members.iter().enumerate() {
-                                                items.push(SelectionKey::Member(MemberKey {
-                                                    commit_idx: container_key.commit_idx,
-                                                    file_idx: container_key.file_idx,
-                                                    container_idx: container_key.container_idx,
-                                                    member_idx,
-                                                }));
-                                                // Add sections for this member
-                                                let section_indices = match member {
-                                                    SemanticMember::Field { section_indices, .. } => section_indices,
-                                                    SemanticMember::Method { section_indices, .. } => section_indices,
-                                                };
-                                                for &section_idx in section_indices {
-                                                    items.push(SelectionKey::Section(SectionKey {
-                                                        commit_idx: container_key.commit_idx,
-                                                        file_idx: container_key.file_idx,
-                                                        section_idx,
-                                                    }));
-                                                }
-                                            }
-                                            items
-                                        }
-                                        SemanticContainer::Interface { methods, .. } => {
-                                            let mut items = Vec::new();
-                                            // Add members
-                                            for (member_idx, method) in methods.iter().enumerate() {
-                                                items.push(SelectionKey::Member(MemberKey {
-                                                    commit_idx: container_key.commit_idx,
-                                                    file_idx: container_key.file_idx,
-                                                    container_idx: container_key.container_idx,
-                                                    member_idx,
-                                                }));
-                                                // Add sections for this member
-                                                let section_indices = match method {
-                                                    SemanticMember::Field { section_indices, .. } => section_indices,
-                                                    SemanticMember::Method { section_indices, .. } => section_indices,
-                                                };
-                                                for &section_idx in section_indices {
-                                                    items.push(SelectionKey::Section(SectionKey {
-                                                        commit_idx: container_key.commit_idx,
-                                                        file_idx: container_key.file_idx,
-                                                        section_idx,
-                                                    }));
-                                                }
-                                            }
-                                            items
+                                        // Containers with children: don't auto-expand children
+                                        SemanticContainer::Struct { .. }
+                                        | SemanticContainer::Impl { .. }
+                                        | SemanticContainer::Class { .. }
+                                        | SemanticContainer::Interface { .. } => {
+                                            // Children (Methods/Fields) will be visible but collapsed
+                                            Vec::new()
                                         }
                                         SemanticContainer::Function { section_indices, .. }
                                         | SemanticContainer::Enum { section_indices, .. }
                                         | SemanticContainer::Object { section_indices, .. }
                                         | SemanticContainer::Module { section_indices, .. }
-                                        | SemanticContainer::Section { section_indices, .. } => {
+                                        | SemanticContainer::Section { section_indices, .. }
+                                        | SemanticContainer::Method { section_indices, .. }
+                                        | SemanticContainer::Field { section_indices, .. } => {
                                             section_indices.iter().map(|&section_idx| {
                                                 SelectionKey::Section(SectionKey {
                                                     commit_idx: container_key.commit_idx,
@@ -2895,10 +2815,11 @@ impl<'state, 'input> Recorder<'state, 'input> {
                     {
                         // Collect section indices before modifying expanded_items
                         let section_indices: Vec<usize> = self.member(member_key).ok().map(|member| {
-                            use crate::SemanticMember;
+                            use crate::SemanticContainer;
                             match member {
-                                SemanticMember::Field { section_indices, .. } => section_indices.clone(),
-                                SemanticMember::Method { section_indices, .. } => section_indices.clone(),
+                                SemanticContainer::Field { section_indices, .. } => section_indices.clone(),
+                                SemanticContainer::Method { section_indices, .. } => section_indices.clone(),
+                                _ => panic!("Member is not Field or Method"),
                             }
                         }).unwrap_or_default();
 
@@ -2935,10 +2856,10 @@ impl<'state, 'input> Recorder<'state, 'input> {
             .into_iter()
             .filter(|selection_key| match selection_key {
                 SelectionKey::None | SelectionKey::File(_) | SelectionKey::Line(_) => false,
-                // Semantic containers start collapsed when a file is expanded
-                SelectionKey::Container(_) => false,
-                // Members and sections are expanded so diff lines are visible immediately
-                SelectionKey::Member(_) | SelectionKey::Section(_) => true,
+                // Semantic containers and members start collapsed when a file is expanded
+                SelectionKey::Container(_) | SelectionKey::Member(_) => false,
+                // Sections are expanded so diff lines are visible immediately when you expand a container/member
+                SelectionKey::Section(_) => true,
             })
             .collect();
     }
@@ -3131,14 +3052,16 @@ impl<'state, 'input> Recorder<'state, 'input> {
 
         // Search through all containers and their members
         for (container_idx, container) in containers.iter().enumerate() {
-            use crate::{SemanticContainer, SemanticMember};
+            use crate::SemanticContainer;
 
             match container {
                 SemanticContainer::Function { section_indices, .. }
                 | SemanticContainer::Enum { section_indices, .. }
                 | SemanticContainer::Object { section_indices, .. }
                 | SemanticContainer::Module { section_indices, .. }
-                | SemanticContainer::Section { section_indices, .. } => {
+                | SemanticContainer::Section { section_indices, .. }
+                | SemanticContainer::Method { section_indices, .. }
+                | SemanticContainer::Field { section_indices, .. } => {
                     if section_indices.contains(&section_idx) {
                         return Some(SelectionKey::Container(ContainerKey {
                             commit_idx,
@@ -3147,10 +3070,10 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         }));
                     }
                 }
-                SemanticContainer::Struct { fields, .. } => {
+                SemanticContainer::Struct { children, .. } => {
                     // Check each field
-                    for (member_idx, field) in fields.iter().enumerate() {
-                        if let SemanticMember::Field { section_indices, .. } = field {
+                    for (member_idx, field) in children.iter().enumerate() {
+                        if let SemanticContainer::Field { section_indices, .. } = field {
                             if section_indices.contains(&section_idx) {
                                 return Some(SelectionKey::Member(MemberKey {
                                     commit_idx,
@@ -3162,10 +3085,10 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         }
                     }
                 }
-                SemanticContainer::Impl { methods, .. } => {
+                SemanticContainer::Impl { children, .. } => {
                     // Check each method
-                    for (member_idx, method) in methods.iter().enumerate() {
-                        if let SemanticMember::Method { section_indices, .. } = method {
+                    for (member_idx, method) in children.iter().enumerate() {
+                        if let SemanticContainer::Method { section_indices, .. } = method {
                             if section_indices.contains(&section_idx) {
                                 return Some(SelectionKey::Member(MemberKey {
                                     commit_idx,
@@ -3177,12 +3100,13 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         }
                     }
                 }
-                SemanticContainer::Class { members, .. } => {
+                SemanticContainer::Class { children, .. } => {
                     // Check each member (field or method)
-                    for (member_idx, member) in members.iter().enumerate() {
+                    for (member_idx, member) in children.iter().enumerate() {
                         let section_indices = match member {
-                            SemanticMember::Field { section_indices, .. } => section_indices,
-                            SemanticMember::Method { section_indices, .. } => section_indices,
+                            SemanticContainer::Field { section_indices, .. } => section_indices,
+                            SemanticContainer::Method { section_indices, .. } => section_indices,
+                            _ => panic!("Class child is not Field or Method"),
                         };
                         if section_indices.contains(&section_idx) {
                             return Some(SelectionKey::Member(MemberKey {
@@ -3194,10 +3118,10 @@ impl<'state, 'input> Recorder<'state, 'input> {
                         }
                     }
                 }
-                SemanticContainer::Interface { methods, .. } => {
+                SemanticContainer::Interface { children, .. } => {
                     // Check each method
-                    for (member_idx, method) in methods.iter().enumerate() {
-                        if let SemanticMember::Method { section_indices, .. } = method {
+                    for (member_idx, method) in children.iter().enumerate() {
+                        if let SemanticContainer::Method { section_indices, .. } = method {
                             if section_indices.contains(&section_idx) {
                                 return Some(SelectionKey::Member(MemberKey {
                                     commit_idx,
@@ -3333,7 +3257,9 @@ impl<'state, 'input> Recorder<'state, 'input> {
             | crate::SemanticContainer::Enum { is_checked, is_partial, .. }
             | crate::SemanticContainer::Object { is_checked, is_partial, .. }
             | crate::SemanticContainer::Module { is_checked, is_partial, .. }
-            | crate::SemanticContainer::Section { is_checked, is_partial, .. } => {
+            | crate::SemanticContainer::Section { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Method { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Field { is_checked, is_partial, .. } => {
                 if *is_checked {
                     if *is_partial {
                         Tristate::Partial
@@ -3348,7 +3274,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
     }
 
     #[cfg(feature = "tree-sitter")]
-    fn member(&self, member_key: MemberKey) -> Result<&crate::SemanticMember, RecordError> {
+    fn member(&self, member_key: MemberKey) -> Result<&crate::SemanticContainer, RecordError> {
         let MemberKey {
             commit_idx,
             file_idx,
@@ -3361,15 +3287,17 @@ impl<'state, 'input> Recorder<'state, 'input> {
             container_idx,
         })?;
         let members = match container {
-            crate::SemanticContainer::Struct { fields, .. } => fields,
-            crate::SemanticContainer::Impl { methods, .. } => methods,
-            crate::SemanticContainer::Class { members, .. } => members,
-            crate::SemanticContainer::Interface { methods, .. } => methods,
+            crate::SemanticContainer::Struct { children, .. } => children,
+            crate::SemanticContainer::Impl { children, .. } => children,
+            crate::SemanticContainer::Class { children, .. } => children,
+            crate::SemanticContainer::Interface { children, .. } => children,
             crate::SemanticContainer::Function { .. }
             | crate::SemanticContainer::Enum { .. }
             | crate::SemanticContainer::Object { .. }
             | crate::SemanticContainer::Module { .. }
-            | crate::SemanticContainer::Section { .. } => {
+            | crate::SemanticContainer::Section { .. }
+            | crate::SemanticContainer::Field { .. }
+            | crate::SemanticContainer::Method { .. } => {
                 return Err(RecordError::Bug(format!(
                     "This container type doesn't have members: {member_key:?}"
                 )));
@@ -3387,8 +3315,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
     fn member_tristate(&self, member_key: MemberKey) -> Result<Tristate, RecordError> {
         let member = self.member(member_key)?;
         Ok(match member {
-            crate::SemanticMember::Field { is_checked, is_partial, .. }
-            | crate::SemanticMember::Method { is_checked, is_partial, .. } => {
+            crate::SemanticContainer::Field { is_checked, is_partial, .. }
+            | crate::SemanticContainer::Method { is_checked, is_partial, .. } => {
                 if *is_checked {
                     if *is_partial {
                         Tristate::Partial
@@ -3398,6 +3326,11 @@ impl<'state, 'input> Recorder<'state, 'input> {
                 } else {
                     Tristate::False
                 }
+            }
+            _ => {
+                return Err(RecordError::Bug(format!(
+                    "member_tristate called with non-member container: {member_key:?}"
+                )));
             }
         })
     }
@@ -4000,7 +3933,7 @@ struct MemberView<'a> {
     toggle_box: TristateBox<ComponentId>,
     expand_box: TristateBox<ComponentId>,
     is_header_selected: bool,
-    member: &'a crate::SemanticMember,
+    member: &'a crate::SemanticContainer,
     section_views: Vec<SectionView<'a>>,
 }
 
@@ -4036,6 +3969,9 @@ impl ContainerView<'_> {
             crate::SemanticContainer::Section { name, level, .. } => {
                 let prefix = "#".repeat(*level);
                 ('\u{f0274}', format!("{} {}", prefix, name))
+            }
+            crate::SemanticContainer::Method { .. } | crate::SemanticContainer::Field { .. } => {
+                panic!("ContainerView should not contain Method or Field variants - these should be in MemberView");
             }
         }
     }
@@ -4143,8 +4079,9 @@ impl MemberView<'_> {
 
     fn icon_and_name(&self) -> (char, String) {
         match self.member {
-            crate::SemanticMember::Field { name, .. } => ('\u{eb5f}', format!("field {}", name)),
-            crate::SemanticMember::Method { name, .. } => ('\u{f0871}', format!("fn {}", name)),
+            crate::SemanticContainer::Field { name, .. } => ('\u{eb5f}', format!("field {}", name)),
+            crate::SemanticContainer::Method { name, .. } => ('\u{f0871}', format!("fn {}", name)),
+            _ => panic!("MemberView contains non-member container"),
         }
     }
 }
@@ -5398,7 +5335,7 @@ mod tests {
     #[test]
     #[cfg(feature = "tree-sitter")]
     fn test_member_expansion_shows_sections_and_lines() {
-        use crate::{SemanticContainer, SemanticMember, ChangeType, SectionChangedLine};
+        use crate::{SemanticContainer, ChangeType, SectionChangedLine};
 
         // Test with a Struct that has a Member (Field)
         let file = File {
@@ -5419,8 +5356,8 @@ mod tests {
             containers: Some(vec![
                 SemanticContainer::Struct {
                     name: "TestStruct".to_string(),
-                    fields: vec![
-                        SemanticMember::Field {
+                    children: vec![
+                        SemanticContainer::Field {
                             name: "test_field".to_string(),
                             section_indices: vec![0],
                             is_checked: false,
@@ -5452,9 +5389,9 @@ mod tests {
         assert!(recorder.expanded_items.contains(&SelectionKey::Section(section_key)),
             "Section should be expanded by default");
 
-        // Member should ALSO be in expanded_items by default (so sections/lines show immediately)
-        assert!(recorder.expanded_items.contains(&SelectionKey::Member(member_key)),
-            "Member should be expanded by default to show sections/lines immediately");
+        // Member should NOT be in expanded_items by default - it starts collapsed
+        assert!(!recorder.expanded_items.contains(&SelectionKey::Member(member_key)),
+            "Member should start collapsed, not auto-expanded");
 
         // Expand file, container, and member
         recorder.expanded_items.insert(SelectionKey::File(file_key));
