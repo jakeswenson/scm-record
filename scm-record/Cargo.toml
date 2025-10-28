@@ -16,8 +16,18 @@ rust-version = "1.85"
 
 [features]
 debug = ["serde"]
-default = ["debug"]
+default = ["debug", "tree-sitter"]
 serde = ["dep:serde", "dep:serde_json"]
+tree-sitter = [
+    "dep:tree-sitter",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-kotlin-ng",
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-hcl",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-md",
+    "dep:tree-sitter-yaml",
+]
 
 [dependencies]
 cassowary = "0.3"
@@ -31,6 +41,18 @@ unicode-width = "0.2"
 # Features: serde
 serde = { version = "1.0", features = ["serde_derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
+
+# Features: tree-sitter
+streaming-iterator = "0.1.9"
+tree-sitter = { version = "0.25.10", optional = true }
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-kotlin-ng = { version = "1.1.0", optional = true }
+tree-sitter-java = { version = "0.23.5", optional = true }
+tree-sitter-hcl = { version = "1.1", optional = true }
+tree-sitter-python = { version = "0.25", optional = true }
+tree-sitter-md = { version = "0.5.1", optional = true }
+tree-sitter-yaml = { version = "0.7.2", optional = true }
+# Note: tree-sitter-toml = "0.20.0" uses incompatible tree-sitter version, moved to Second Wave
 
 [dev-dependencies]
 assert_matches = "1.5"
