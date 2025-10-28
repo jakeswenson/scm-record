@@ -234,4 +234,38 @@ Installation steps.
         assert_eq!(containers[1].container.name, "Features");
         assert_eq!(containers[2].container.name, "Installation");
     }
+
+    #[test]
+    fn test_markdown_sections_have_no_members() {
+        // Regression test: ensure markdown sections have empty members list
+        // so they get section assignments via the "no members" path in
+        // enhance_file_with_containers, not the "assign to members" path.
+        let source = r#"# Main Header
+
+Some content.
+
+## Subheader
+
+More content.
+"#;
+        let mut parser = create_parser(SupportedLanguage::Markdown).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+        assert!(containers.len() >= 2);
+
+        // All markdown sections should have no members
+        for container_with_members in &containers {
+            assert!(
+                container_with_members.members.is_empty(),
+                "Markdown sections should not have members, found {} members for '{}'",
+                container_with_members.members.len(),
+                container_with_members.container.name
+            );
+        }
+    }
 }

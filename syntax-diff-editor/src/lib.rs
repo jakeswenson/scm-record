@@ -36,6 +36,8 @@ use scm_record::{
 #[derive(Debug, Parser)]
 pub struct Opts {
     /// Instead of comparing two files, compare two directories recursively.
+    /// Auto-detected when both paths are directories; use this flag to force
+    /// directory mode or make behavior explicit in scripts.
     #[clap(short = 'd', long = "dir-diff")]
     pub dir_diff: bool,
 
@@ -118,6 +120,14 @@ pub enum Error {
 
     #[error("file was not text: {path}")]
     BinaryMergeFile { path: PathBuf },
+
+    #[error("mixed path types: {left} is a {left_type} but {right} is a {right_type}")]
+    MixedPathTypes {
+        left: PathBuf,
+        left_type: String,
+        right: PathBuf,
+        right_type: String,
+    },
 
     #[error("recording changes: {source}")]
     Record { source: RecordError },
@@ -338,9 +348,35 @@ pub struct DiffContext {
 
 /// Process the command-line options to find the files to diff.
 pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffContext> {
+    use tracing::debug;
+
+    // Auto-detect directory diff mode when both paths are directories
+    let left_is_dir = opts.left.is_dir();
+    let right_is_dir = opts.right.is_dir();
+
+    // Check for mixed path types (one directory, one file)
+    if left_is_dir != right_is_dir && opts.base.is_none() {
+        let left_type = if left_is_dir { "directory" } else { "file" };
+        let right_type = if right_is_dir { "directory" } else { "file" };
+        return Err(Error::MixedPathTypes {
+            left: opts.left.clone(),
+            left_type: left_type.to_string(),
+            right: opts.right.clone(),
+            right_type: right_type.to_string(),
+        });
+    }
+
+    // Effective dir_diff: explicit flag OR both paths are directories
+    let effective_dir_diff = opts.dir_diff || (left_is_dir && right_is_dir && opts.base.is_none());
+
+    if effective_dir_diff && !opts.dir_diff {
+        debug!("Auto-detected directory diff mode: both {} and {} are directories",
+               opts.left.display(), opts.right.display());
+    }
+
     let result = match opts {
         Opts {
-            dir_diff: false,
+            dir_diff: _,
             left,
             right,
             base: None,
@@ -348,7 +384,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             read_only: _,
             dry_run: _,
             ..
-        } => {
+        } if !effective_dir_diff => {
             let files = vec![render::create_file(
                 filesystem,
                 left.clone(),
@@ -363,7 +399,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
         }
 
         Opts {
-            dir_diff: true,
+            dir_diff: _,
             left,
             right,
             base: None,
@@ -371,7 +407,7 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             read_only: _,
             dry_run: _,
             ..
-        } => {
+        } if effective_dir_diff => {
             let display_paths = filesystem.read_dir_diff_paths(left, right)?;
             let mut files = Vec::new();
             for display_path in display_paths {
@@ -436,6 +472,12 @@ pub fn process_opts(filesystem: &dyn Filesystem, opts: &Opts) -> Result<DiffCont
             ..
         } => {
             unimplemented!("--base cannot be used with --dir-diff");
+        }
+
+        // This arm should never be reached since the guards above cover all cases
+        // where base is None (either effective_dir_diff is true or false)
+        _ => {
+            unreachable!("All cases should be handled by the match arms above")
         }
     };
     Ok(result)

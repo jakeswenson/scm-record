@@ -1282,8 +1282,9 @@ pub fn try_add_semantic_containers<'a>(
     for (container_idx, container_with_members) in containers_with_members.iter().enumerate() {
         let ContainerWithMembers { container, members } = container_with_members;
 
-        // For functions (no members), assign sections directly to the container
-        if matches!(container.kind, ContainerKind::Function) {
+        // For containers without members (functions, sections, modules, etc.),
+        // assign sections directly to the container
+        if members.is_empty() {
             let section_indices = filter_section_indices_by_range(
                 &section_ranges,
                 container.start_line,
@@ -1627,3 +1628,104 @@ pub mod hcl;
 pub mod markdown;
 #[cfg(feature = "tree-sitter")]
 pub mod yaml;
+
+#[cfg(test)]
+mod tests {
+    use super::try_add_semantic_containers;
+    use crate::{ChangeType, File, Section, SectionChangedLine, SemanticContainer};
+    use std::borrow::Cow;
+    use std::path::Path;
+
+    #[test]
+    fn test_markdown_sections_get_section_assignments() {
+        // Integration test: verify that markdown sections (which have no members)
+        // correctly get section assignments via the "no members" path
+        let old_source = r#"# Header One
+
+Old content here.
+
+## Header Two
+
+More old content.
+"#;
+
+        let new_source = r#"# Header One
+
+New content here.
+
+## Header Two
+
+More new content.
+"#;
+
+        // Create a file with actual change sections
+        let mut file = File {
+            old_path: Some(Cow::Borrowed(Path::new("test.md"))),
+            path: Cow::Borrowed(Path::new("test.md")),
+            file_mode: crate::FileMode::Unix(0o100644),
+            sections: vec![
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("Old content here.\n"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("New content here.\n"),
+                        },
+                    ],
+                },
+                Section::Unchanged {
+                    lines: vec![Cow::Borrowed("\n")],
+                },
+                Section::Changed {
+                    lines: vec![
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Removed,
+                            line: Cow::Borrowed("More old content.\n"),
+                        },
+                        SectionChangedLine {
+                            is_checked: false,
+                            change_type: ChangeType::Added,
+                            line: Cow::Borrowed("More new content.\n"),
+                        },
+                    ],
+                },
+            ],
+            containers: None,
+        };
+
+        // Enhance the file with semantic containers
+        file = try_add_semantic_containers(file, old_source, new_source);
+
+        // Verify containers were created
+        assert!(
+            file.containers.is_some(),
+            "Expected containers to be created for markdown file"
+        );
+
+        let containers = file.containers.unwrap();
+        assert!(
+            !containers.is_empty(),
+            "Expected at least one markdown section container"
+        );
+
+        // Verify that at least one container has section assignments
+        let has_sections = containers.iter().any(|c| match c {
+            SemanticContainer::Section {
+                section_indices, ..
+            } => !section_indices.is_empty(),
+            _ => false,
+        });
+
+        assert!(
+            has_sections,
+            "Expected markdown sections to have section_indices assigned. Containers: {:#?}",
+            containers
+        );
+    }
+}

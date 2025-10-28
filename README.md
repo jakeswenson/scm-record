@@ -65,6 +65,23 @@ The `syntax-diff-editor` executable can be used with:
 - **[Mercurial](https://www.mercurial-scm.org/)**: via [the `extdiff` extension](https://wiki.mercurial-scm.org/ExtdiffExtension)
 - **Any source control system** that supports external diff/merge tools
 
+#### Basic Usage
+
+```sh
+# Compare two files
+syntax-diff-editor file1.txt file2.txt
+
+# Compare two directories (auto-detected)
+syntax-diff-editor dir1/ dir2/
+
+# Compare two directories (explicit flag)
+syntax-diff-editor --dir-diff dir1/ dir2/
+```
+
+**Note**: Directory mode is automatically detected when both paths are directories. You can use the `--dir-diff` flag to make the behavior explicit or for use in scripts.
+
+#### Git Integration
+
 Example Git configuration:
 
 ```sh
