@@ -29,6 +29,8 @@ fn bench_record(c: &mut Criterion) {
         sections: vec![Section::Changed {
           lines: [vec![before_line; 1000], vec![after_line; 1000]].concat(),
         }],
+        #[cfg(feature = "tree-sitter")]
+        containers: None,
       }],
     };
     let mut input = TestingInput::new(
