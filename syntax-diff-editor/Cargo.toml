@@ -1,10 +1,10 @@
 [package]
-authors = ["Waleed Khan <me@waleedkhan.name>"]
-description = "UI component to interactively select changes to include in a commit."
+authors = ["Waleed Khan <me@waleedkhan.name>", "Jake Swenson"]
+description = "Interactive diff editor with syntax-aware navigation via tree-sitter. Fork of scm-diff-editor with semantic code navigation."
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "syntax-diff-editor"
-repository = "https://github.com/arxanas/scm-record"
+repository = "https://github.com/jakeswenson/scm-record"
 version = "0.8.0"
 
 # Keep in sync with `scm-record/Cargo.toml`.
