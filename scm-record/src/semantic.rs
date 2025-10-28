@@ -1261,8 +1261,9 @@ pub fn try_add_semantic_containers<'a>(
         SupportedLanguage::Python => python::extract_containers_with_members(&new_parsed),
         SupportedLanguage::Kotlin => kotlin::extract_containers_with_members(&new_parsed),
         SupportedLanguage::Java => java::extract_containers_with_members(&new_parsed),
-        // Other languages not yet implemented (HCL, Markdown, YAML)
-        _ => return file,
+        SupportedLanguage::Hcl => hcl::extract_containers_with_members(&new_parsed),
+        SupportedLanguage::Markdown => markdown::extract_containers_with_members(&new_parsed),
+        SupportedLanguage::Yaml => yaml::extract_containers_with_members(&new_parsed),
     };
 
     // Build semantic containers with section mapping
@@ -1448,3 +1449,9 @@ pub mod python;
 pub mod kotlin;
 #[cfg(feature = "tree-sitter")]
 pub mod java;
+#[cfg(feature = "tree-sitter")]
+pub mod hcl;
+#[cfg(feature = "tree-sitter")]
+pub mod markdown;
+#[cfg(feature = "tree-sitter")]
+pub mod yaml;

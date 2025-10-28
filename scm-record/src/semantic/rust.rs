@@ -230,6 +230,57 @@ pub fn extract_containers_with_members(parsed: &ParsedFile) -> Vec<ContainerWith
                     });
                 }
             }
+            "mod_item" => {
+                // Extract the module itself
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let module_name = name_node
+                        .utf8_text(source_bytes)
+                        .unwrap_or("<unknown>")
+                        .to_string();
+
+                    let (start_line, end_line) =
+                        expand_range_for_attributes_and_comments(child, root_node);
+
+                    containers.push(ContainerWithMembers {
+                        container: Container {
+                            kind: ContainerKind::Module,
+                            name: module_name,
+                            start_line,
+                            end_line,
+                        },
+                        members: Vec::new(),
+                    });
+                }
+
+                // Also extract functions inside the module as separate containers
+                // This is important for test modules where each test function should be navigable
+                if let Some(body) = child.child_by_field_name("body") {
+                    let mut body_cursor = body.walk();
+                    for item in body.children(&mut body_cursor) {
+                        if item.kind() == "function_item" {
+                            if let Some(name_node) = item.child_by_field_name("name") {
+                                let name = name_node
+                                    .utf8_text(source_bytes)
+                                    .unwrap_or("<unknown>")
+                                    .to_string();
+
+                                let (start_line, end_line) =
+                                    expand_range_for_attributes_and_comments(item, body);
+
+                                containers.push(ContainerWithMembers {
+                                    container: Container {
+                                        kind: ContainerKind::Function,
+                                        name,
+                                        start_line,
+                                        end_line,
+                                    },
+                                    members: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -580,4 +631,169 @@ fn documented_function() {
         assert_eq!(containers[0].container.start_line, 1);
         assert_eq!(containers[0].container.name, "documented_function");
     }
+
+    #[test]
+    fn test_rust_trivia_combined_attributes_and_doc_comments() {
+        let source = r#"
+/// Documentation for the struct
+/// with multiple lines
+#[derive(Debug, Clone)]
+#[cfg(test)]
+struct TestStruct {
+    field: i32,
 }
+"#;
+        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+        assert_eq!(containers.len(), 1);
+
+        // Should start at line 1 where the doc comment starts
+        assert_eq!(containers[0].container.start_line, 1);
+        assert_eq!(containers[0].container.name, "TestStruct");
+    }
+
+    #[test]
+    fn test_rust_trivia_method_with_attributes_and_comments() {
+        let source = r#"
+impl Point {
+    /// Gets the X coordinate
+    #[inline]
+    fn get_x(&self) -> i32 {
+        self.x
+    }
+
+    /// Gets the Y coordinate
+    #[inline]
+    #[must_use]
+    fn get_y(&self) -> i32 {
+        self.y
+    }
+}
+"#;
+        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+        assert_eq!(containers.len(), 1);
+        assert_eq!(containers[0].members.len(), 2);
+
+        // First method should include its doc comment and attribute
+        assert_eq!(containers[0].members[0].name, "get_x");
+        assert_eq!(containers[0].members[0].start_line, 2); // Line of doc comment
+
+        // Second method should include both doc comment and both attributes
+        assert_eq!(containers[0].members[1].name, "get_y");
+        assert_eq!(containers[0].members[1].start_line, 8); // Line of doc comment
+    }
+
+    #[test]
+    fn test_rust_whitespace_attribute_function() {
+        let source = r#"
+
+#[test]
+fn test_something() {
+    assert!(true);
+}
+"#;
+        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+        assert_eq!(containers.len(), 1, "Should find the function");
+        assert_eq!(containers[0].container.name, "test_something");
+        // The function should include the attribute in its range
+        assert_eq!(containers[0].container.start_line, 2); // Line with #[test]
+    }
+
+    #[test]
+    fn test_rust_multiple_blanks_attribute_function() {
+        let source = r#"
+
+
+
+#[cfg(test)]
+fn another_test() {
+    assert!(true);
+}
+"#;
+        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+        assert_eq!(containers.len(), 1, "Should find the function even after multiple blank lines");
+        assert_eq!(containers[0].container.name, "another_test");
+        assert_eq!(containers[0].container.start_line, 4); // Line with #[cfg(test)]
+    }
+
+    #[test]
+    fn test_module_with_multiple_test_functions() {
+        // This reproduces the issue where test functions inside a module
+        // should be recognized as separate containers, not just as members of the module
+        let source = r#"
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_one() {
+        assert!(true);
+    }
+
+    #[test]
+    fn test_two() {
+        assert!(true);
+    }
+
+    #[test]
+    fn test_three() {
+        assert!(true);
+    }
+}
+"#;
+        let mut parser = create_parser(SupportedLanguage::Rust).unwrap();
+        let tree = parse_source(&mut parser, source).unwrap();
+        let parsed = ParsedFile {
+            source: source.to_string(),
+            tree,
+        };
+
+        let containers = extract_containers_with_members(&parsed);
+
+        // Now we extract both the module AND the functions inside it as separate containers
+        // This allows each test function to be navigable independently in the diff view
+        assert_eq!(containers.len(), 4, "Should find module + 3 test functions");
+
+        // First container should be the module
+        assert_eq!(containers[0].container.name, "tests");
+        assert!(matches!(containers[0].container.kind, ContainerKind::Module));
+
+        // Next three containers should be the test functions
+        assert_eq!(containers[1].container.name, "test_one");
+        assert!(matches!(containers[1].container.kind, ContainerKind::Function));
+
+        assert_eq!(containers[2].container.name, "test_two");
+        assert!(matches!(containers[2].container.kind, ContainerKind::Function));
+
+        assert_eq!(containers[3].container.name, "test_three");
+        assert!(matches!(containers[3].container.kind, ContainerKind::Function));
+    }
+}
+
