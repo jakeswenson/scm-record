@@ -31,36 +31,36 @@ tree-sitter = [
 ]
 
 [dependencies]
-cassowary = "0.3"
-crossterm = "0.29"
-num-traits = "0.2"
-thiserror = "2.0"
-tracing = "0.1"
-ratatui = "0.29.0"
-unicode-width = "0.2"
+cassowary = { workspace = true }
+crossterm = { workspace = true }
+num-traits = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ratatui = { workspace = true }
+unicode-width = { workspace = true }
 
 # Features: serde
-serde = { version = "1.0", features = ["serde_derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 # Features: tree-sitter
-streaming-iterator = "0.1.9"
-tree-sitter = { version = "0.25.10", optional = true }
-tree-sitter-rust = { version = "0.24", optional = true }
-tree-sitter-kotlin-ng = { version = "1.1.0", optional = true }
-tree-sitter-java = { version = "0.23.5", optional = true }
-tree-sitter-hcl = { version = "1.1", optional = true }
-tree-sitter-python = { version = "0.25", optional = true }
-tree-sitter-md = { version = "0.5.1", optional = true }
-tree-sitter-yaml = { version = "0.7.2", optional = true }
+streaming-iterator = { workspace = true }
+tree-sitter = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-kotlin-ng = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-hcl = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-md = { workspace = true, optional = true }
+tree-sitter-yaml = { workspace = true, optional = true }
 # Note: tree-sitter-toml = "0.20.0" uses incompatible tree-sitter version, moved to Second Wave
 
 [dev-dependencies]
-assert_matches = "1.5"
-criterion = "0.7"
-insta = "1.43"
-proptest = "1.8.0"
-serde_json = "1.0"
+assert_matches = { workspace = true }
+criterion = { workspace = true }
+insta = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "benches"

@@ -1,3 +1,42 @@
 [workspace]
 resolver = "2"
 members = ["syntax-diff-editor", "scm-record"]
+
+[workspace.dependencies]
+# Core dependencies
+cassowary = "0.3"
+crossterm = "0.29"
+num-traits = "0.2"
+thiserror = "2.0"
+tracing = "0.1"
+ratatui = "0.29.0"
+unicode-width = "0.2"
+
+# Features: serde
+serde = { version = "1.0", features = ["serde_derive"] }
+serde_json = "1.0"
+
+# Features: tree-sitter
+streaming-iterator = "0.1.9"
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-java = "0.23"
+tree-sitter-hcl = "1.1"
+tree-sitter-python = "0.25"
+tree-sitter-md = "0.5"
+tree-sitter-yaml = "0.7"
+
+# syntax-diff-editor dependencies
+clap = { version = "4.5", features = ["derive"] }
+diffy = "0.4"
+sha1 = "0.10"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+walkdir = "2.5"
+
+# Dev dependencies
+assert_matches = "1.5"
+criterion = "0.7"
+insta = "1.43"
+proptest = "1.8"
+maplit = "1.0"
