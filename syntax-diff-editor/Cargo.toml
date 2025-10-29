@@ -4,7 +4,7 @@ description = "Interactive diff editor with syntax-aware navigation via tree-sit
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "syntax-diff-editor"
-repository = "https://github.com/jakeswenson/scm-record"
+repository = "https://github.com/jakeswenson/syntax-diff-editor"
 version = "0.8.0"
 
 # Keep in sync with `scm-record/Cargo.toml`.

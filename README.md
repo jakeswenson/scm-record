@@ -53,6 +53,14 @@ All credit for the core design and implementation goes to the original authors. 
 
 ### Installation
 
+Install directly from the git repository:
+
+```sh
+cargo install --git https://github.com/jakeswenson/syntax-diff-editor.git syntax-diff-editor
+```
+
+Or install from crates.io once published:
+
 ```sh
 cargo install --locked syntax-diff-editor
 ```
