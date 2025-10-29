@@ -1568,7 +1568,8 @@ impl<'state, 'input> Recorder<'state, 'input> {
       }
       (None, Event::FocusOuter { fold_section }) => self.select_outer(fold_section),
       (None, Event::FocusInner) => {
-        // If currently on a collapsed container, expand it first
+        // If currently on a collapsed container/member, expand it first
+        // Files auto-expand when selecting children, so they don't need early-return
         match self.selection_key {
           SelectionKey::Container(container_key) => {
             if !self
@@ -1600,13 +1601,7 @@ impl<'state, 'input> Recorder<'state, 'input> {
             }
             // Section is already expanded, proceed to select child
           }
-          SelectionKey::File(file_key) => {
-            if !self.expanded_items.contains(&SelectionKey::File(file_key)) {
-              // File is collapsed, expand it
-              return Ok(StateUpdate::ToggleExpandItem(self.selection_key));
-            }
-            // File is already expanded, proceed to select child
-          }
+          // File case removed - Files auto-expand when selecting children via select_inner()
           _ => {}
         }
 
